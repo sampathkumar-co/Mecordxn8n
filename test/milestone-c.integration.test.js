@@ -345,6 +345,23 @@ test(
     assert.equal(sent.status, 200);
     assert.equal(sent.body.state, "SENT");
 
+    const conflictingDeliveryReplay = await request(
+      `/v1/outbound-actions/${action.id}/record-delivery`,
+      {
+        method: "POST",
+        body: {
+          state: "SENT",
+          deliveredBy: "owner-manual",
+          providerReference: "different-message-id",
+        },
+      },
+    );
+    assert.equal(conflictingDeliveryReplay.status, 409);
+    assert.equal(
+      conflictingDeliveryReplay.body.error,
+      "IDEMPOTENCY_CONFLICT",
+    );
+
     const response = await request(
       `/v1/outbound-actions/${action.id}/responses`,
       {
@@ -553,6 +570,34 @@ test(
     );
     assert.notEqual(stillOpen.body.state, "WON");
 
+    const missingPaymentReference = await request(
+      `/v1/commercial-opportunities/${opportunity.id}/revenue`,
+      {
+        method: "POST",
+        body: {
+          kind: "RECEIVED",
+          amountMinor: 80000,
+          currency: "INR",
+        },
+      },
+    );
+    assert.equal(missingPaymentReference.status, 400);
+
+    const wrongCurrency = await request(
+      `/v1/commercial-opportunities/${opportunity.id}/revenue`,
+      {
+        method: "POST",
+        body: {
+          kind: "INVOICED",
+          amountMinor: 1000,
+          currency: "USD",
+          externalReference: "invoice-usd",
+        },
+      },
+    );
+    assert.equal(wrongCurrency.status, 409);
+    assert.equal(wrongCurrency.body.error, "CURRENCY_MISMATCH");
+
     const received = await request(
       `/v1/commercial-opportunities/${opportunity.id}/revenue`,
       {
@@ -723,5 +768,40 @@ test(
     );
     assert.equal(retried.status, 202);
     assert.notEqual(retried.body.approval.id, pending.body.approval.id);
+  },
+);
+
+test(
+  "commercial destination validation rejects malformed contact channels",
+  { skip: !enabled },
+  async () => {
+    const fixture = await createVerifiedFixture(
+      "commercial-destination.example.com",
+    );
+    const badEmail = await request(
+      `/v1/targets/${fixture.target.id}/commercial-contacts`,
+      {
+        method: "POST",
+        body: {
+          channel: "EMAIL",
+          destination: "not-an-email",
+          consentState: "UNKNOWN",
+        },
+      },
+    );
+    assert.equal(badEmail.status, 400);
+
+    const badPhone = await request(
+      `/v1/targets/${fixture.target.id}/commercial-contacts`,
+      {
+        method: "POST",
+        body: {
+          channel: "PHONE",
+          destination: "abc",
+          consentState: "UNKNOWN",
+        },
+      },
+    );
+    assert.equal(badPhone.status, 400);
   },
 );

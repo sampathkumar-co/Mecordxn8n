@@ -20,6 +20,7 @@ import {
 } from "./repository.js";
 import { handleMilestoneARoute } from "./milestone-a/routes.js";
 import { handleMilestoneBRoute } from "./milestone-b/routes.js";
+import { handleMilestoneCRoute } from "./milestone-c/routes.js";
 
 const MAX_BODY_BYTES = 256 * 1024;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -276,6 +277,16 @@ export function createServer({
       if (!requireBearer(req, workerRoute ? workerToken : orchestratorToken)) {
         return json(res, 401, { error: "UNAUTHORIZED" });
       }
+
+      const milestoneCHandled = await handleMilestoneCRoute({
+        req,
+        res,
+        url,
+        json,
+        readJson,
+        badRequest,
+      });
+      if (milestoneCHandled !== false) return;
 
       const milestoneBHandled = await handleMilestoneBRoute({
         req,

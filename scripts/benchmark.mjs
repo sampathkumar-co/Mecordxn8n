@@ -7,7 +7,7 @@ import {
   assertAuthorized,
 } from "../src/authorization.js";
 import { compareSnapshots } from "../src/milestone-b/regression.js";
-import { scoreFindingIntelligence } from "../src/milestone-a/intelligence.js";
+import { computeFindingIntelligence } from "../src/milestone-a/intelligence.js";
 
 const iterations = Number(process.env.BENCHMARK_ITERATIONS || 20000);
 const auth = {
@@ -43,16 +43,17 @@ for (let i = 0; i < iterations; i += 1) {
   );
   regressions += result.length;
 
-  const scored = scoreFindingIntelligence({
-    finding: {
+  const scored = computeFindingIntelligence(
+    {
       category: "browser-network",
       severity: "MEDIUM",
       confidence: 0.95,
       affectedUrl: "https://example.test/checkout",
       title: "Checkout request failed",
+      occurrences: 1,
     },
-    verification: { status: "VERIFIED", confidence: 0.95 },
-  });
+    { status: "VERIFIED", confidence: 0.95 },
+  );
   assert.ok(scored.opportunityScore >= 0 && scored.opportunityScore <= 100);
 }
 const elapsedMs = performance.now() - started;

@@ -103,15 +103,17 @@ function boundedObject(value, name, badRequest, maxBytes = 32 * 1024) {
 
 function approvalFailure(json, res, result) {
   if (result.status === "NOT_FOUND") {
-    return json(res, 404, { error: "APPROVAL_NOT_FOUND" });
+    json(res, 404, { error: "APPROVAL_NOT_FOUND" });
+    return true;
   }
   if (result.status === "EXPIRED") {
-    return json(res, 409, {
+    json(res, 409, {
       error: "APPROVAL_EXPIRED",
       approval: result.approval,
     });
+    return true;
   }
-  return null;
+  return false;
 }
 
 export async function handleMilestoneCRoute({

@@ -411,3 +411,70 @@ test(
     assert.deepEqual(second.body, { error: "SIGNUP_CONFLICT" });
   },
 );
+
+test(
+  "all-failed first assessment blocks onboarding and never generates a report",
+  { skip: !enabled },
+  async () => {
+    const account = await signup("failed-assessment");
+    const token = account.token;
+    const workspaceId = account.workspace.id;
+    const target = await request(
+      "/v1/platform/workspaces/" + workspaceId + "/targets",
+      {
+        method: "POST",
+        token,
+        body: {
+          organizationName: "Failed assessment target",
+          baseUrl: "https://failed-assessment.example.test",
+          authorization: {
+            mode: "PUBLIC_QA_ONLY",
+            allowedHosts: ["failed-assessment.example.test"],
+            allowedCapabilities: ["PUBLIC_HTTP_OBSERVE", "BROWSER_QA"],
+          },
+        },
+      },
+    );
+    assert.equal(target.status, 201);
+
+    const assessed = await request(
+      "/v1/platform/workspaces/" + workspaceId +
+        "/targets/" + target.body.id + "/assess",
+      { method: "POST", token, body: {} },
+    );
+    assert.equal(assessed.status, 202);
+
+    await pool.query(
+      `UPDATE jobs
+          SET state = 'FAILED',
+              completed_at = now(),
+              error = '{"code":"TEST_WORKER_FAILED"}'::jsonb
+        WHERE id = ANY($1::uuid[])`,
+      [[assessed.body.jobs.http.id, assessed.body.jobs.browser.id]],
+    );
+
+    const maintenance = await request("/v1/maintenance/onboarding", {
+      method: "POST",
+      token: ORCHESTRATOR_TOKEN,
+      body: {},
+    });
+    assert.equal(maintenance.status, 200);
+    assert.equal(maintenance.body.blockedAssessments, 1);
+    assert.equal(maintenance.body.finalized, 0);
+
+    const onboarding = await request(
+      "/v1/platform/workspaces/" + workspaceId + "/onboarding",
+      { token },
+    );
+    assert.equal(onboarding.status, 200);
+    assert.equal(onboarding.body.status, "BLOCKED");
+    assert.equal(onboarding.body.blockedReason, "ASSESSMENT_FAILED");
+    assert.equal(onboarding.body.firstReportId, null);
+
+    const reportCount = await pool.query(
+      "SELECT COUNT(*)::int AS count FROM reports WHERE target_id = $1",
+      [target.body.id],
+    );
+    assert.equal(reportCount.rows[0].count, 0);
+  },
+);

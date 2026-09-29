@@ -9,8 +9,10 @@ ALTER TABLE workspace_subscriptions
 CREATE TABLE IF NOT EXISTS workspace_onboarding (
   workspace_id uuid PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,
   status text NOT NULL DEFAULT 'IN_PROGRESS'
-    CHECK (status IN ('IN_PROGRESS','READY','BLOCKED')),
+    CHECK (status IN ('IN_PROGRESS','FINALIZING','READY','BLOCKED')),
   completed_steps text[] NOT NULL DEFAULT '{}',
+  finalization_attempts integer NOT NULL DEFAULT 0 CHECK (finalization_attempts >= 0),
+  last_error_code text,
   primary_target_id uuid REFERENCES targets(id) ON DELETE SET NULL,
   first_http_job_id uuid REFERENCES jobs(id) ON DELETE SET NULL,
   first_browser_job_id uuid REFERENCES jobs(id) ON DELETE SET NULL,

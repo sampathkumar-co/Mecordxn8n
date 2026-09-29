@@ -29,6 +29,7 @@ const requiredFiles = [
   "docs/UI_UX_V2_PLAN.md",
   "web/console/styles/v2.css",
   "web/console/views/finding-detail.js",
+  "web/console/views/home.js",
   "web/console/components/evidence.js",
   "web/console/core/router.js",
 ];

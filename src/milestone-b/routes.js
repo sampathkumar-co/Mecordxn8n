@@ -132,7 +132,7 @@ async function materializeQueuedRemediation(
   };
 }
 
-async function queueApprovedRemediation(approval) {
+export async function queueApprovedRemediation(approval) {
   const alreadyQueued = await findRemediationByApprovalId(approval.id);
   if (alreadyQueued) {
     return materializeQueuedRemediation(approval, alreadyQueued);

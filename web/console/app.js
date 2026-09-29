@@ -8,6 +8,7 @@ import { renderFindingDetailView } from "/console/views/finding-detail.js";
 import { renderHomeView } from "/console/views/home.js";
 import { renderApprovalsView } from "/console/views/approvals.js";
 import { renderApprovalDetailView } from "/console/views/approval-detail.js";
+import { renderTargetDetailView } from "/console/views/target-detail.js";
 
 const state = {
   token: sessionStorage.getItem("mecord_session") || "",
@@ -219,6 +220,7 @@ const viewMeta = {
   overview: ["WORKSPACE", "Home", "Add target"],
   launch: ["GO LIVE", "Launch", "Refresh"],
   targets: ["ASSETS", "Targets", "Add target"],
+  targetDetail: ["ENGINEERING", "Target", "Refresh"],
   findings: ["EVIDENCE", "Findings", "Refresh"],
   findingDetail: ["ENGINEERING", "Finding", "Refresh"],
   approvals: ["HUMAN GATES", "Approval inbox", "Refresh"],
@@ -235,6 +237,7 @@ const breadcrumbForView = {
   overview: "Workspace / Home",
   launch: "Workspace / Launch",
   targets: "Workspace / Engineering / Targets",
+  targetDetail: "Workspace / Engineering / Targets / Detail",
   findings: "Workspace / Engineering / Findings",
   findingDetail: "Workspace / Engineering / Findings / Detail",
   operations: "Workspace / Engineering / Runs",
@@ -257,7 +260,9 @@ async function render() {
     ? "findings"
     : state.view === "approvalDetail"
       ? "approvals"
-      : state.view;
+      : state.view === "targetDetail"
+        ? "targets"
+        : state.view;
   document.querySelectorAll(".nav-item").forEach((node) => {
     node.classList.toggle("active", node.dataset.view === activeView);
   });
@@ -267,6 +272,7 @@ async function render() {
       overview: renderOverview,
       launch: renderLaunch,
       targets: renderTargets,
+      targetDetail: renderTargetDetail,
       findings: renderFindings,
       findingDetail: renderFindingDetail,
       approvals: renderApprovals,
@@ -334,7 +340,24 @@ async function renderTargets() {
     "Register the first authorized website or service boundary.",
   );
   document.querySelectorAll(".target-open").forEach((button) => {
-    button.addEventListener("click", () => openAuthorizationCenter(button.dataset.id));
+    button.addEventListener("click", () => navigateConsole("/console/targets/" + button.dataset.id));
+  });
+}
+
+async function renderTargetDetail() {
+  if (!state.params.targetId) {
+    navigateConsole("/console/targets", { replace: true });
+    return;
+  }
+  await renderTargetDetailView({
+    container: content,
+    api,
+    workspaceId: state.workspaceId,
+    targetId: state.params.targetId,
+    workspace: currentWorkspace(),
+    fmtDate,
+    navigate: (path) => navigateConsole(path),
+    toast,
   });
 }
 
@@ -426,8 +449,7 @@ async function renderLaunch() {
         body: JSON.stringify({}),
       });
       toast("Report release approval requested");
-      state.view = "approvals";
-      await render();
+      navigateConsole("/console/approvals");
     } catch (error) { toast(error.message, true); }
   });
   $("#launch-share-report")?.addEventListener("click", async () => {
@@ -462,102 +484,8 @@ async function renderLaunch() {
   });
 }
 
-async function openAuthorizationCenter(targetId) {
-  const center = await api(`/v1/platform/workspaces/${state.workspaceId}/targets/${targetId}/authorization-center`);
-  const current = center.currentAuthorization;
-  const verified = (center.domainVerifications || []).some((item) => item.status === "VERIFIED");
-  openModal("Authorization center", "TARGET TRUST BOUNDARY", `
-    <div class="detail-grid">
-      ${detail("Target", center.target.organization_name)}
-      ${detail("Base URL", center.target.base_url)}
-      ${detail("Current mode", current?.mode || "NONE")}
-      ${detail("Ownership", verified ? "VERIFIED" : "NOT VERIFIED")}
-    </div>
-    <h3>Ownership verification</h3>
-    <p class="muted">Create a DNS TXT challenge, publish it, then verify. Privileged source access remains blocked until this succeeds.</p>
-    <div class="filters">
-      <button class="button small" id="auth-create-challenge">Create DNS challenge</button>
-      ${verified ? '<span class="chip good">Verified</span>' : ""}
-    </div>
-    <h3>Authorization</h3>
-    <form id="auth-upgrade-form">
-      <div class="form-grid">
-        <label>Mode<select name="mode"><option>PUBLIC_QA_ONLY</option><option>BUG_BOUNTY</option><option>CLIENT_AUTHORIZED</option><option>DO_NOT_TEST</option></select></label>
-        <label>Expires at<input name="expiresAt" type="datetime-local"></label>
-        <label class="full">Evidence reference<input name="evidenceReference" maxlength="1000" placeholder="Contract, signed scope, program reference"></label>
-        <label><input name="browser" type="checkbox" checked> Browser QA</label>
-        <label><input name="remediation" type="checkbox"> Source remediation</label>
-      </div>
-      <div class="form-actions">
-        <button class="button danger" id="auth-revoke" type="button">Revoke access</button>
-        <button class="button primary" type="submit">Replace authorization</button>
-      </div>
-    </form>
-    <h3>History</h3>
-    <pre class="code-block">${escapeHtml(JSON.stringify(center.authorizationHistory || [], null, 2))}</pre>`);
-
-  $("#auth-create-challenge").addEventListener("click", async () => {
-    try {
-      const challenge = await api(`/v1/platform/workspaces/${state.workspaceId}/targets/${targetId}/domain-verification`, {
-        method: "POST",
-        body: JSON.stringify({}),
-      });
-      $("#modal-content").innerHTML = `
-        <p class="muted">Create this DNS TXT record, wait for DNS propagation, then verify.</p>
-        <div class="detail-grid">
-          ${detail("TXT name", challenge.dnsName)}
-          ${detail("Expires", fmtDate(challenge.expiresAt))}
-        </div>
-        <pre class="code-block">${escapeHtml(challenge.challenge)}</pre>
-        <div class="form-actions"><button class="button primary" id="verify-dns-now">Verify DNS now</button></div>`;
-      $("#verify-dns-now").addEventListener("click", async () => {
-        try {
-          await api(`/v1/platform/workspaces/${state.workspaceId}/domain-verifications/${challenge.id}/verify`, {
-            method: "POST",
-            body: JSON.stringify({}),
-          });
-          toast("Domain ownership verified");
-          modal.close();
-          await render();
-        } catch (error) { toast(error.message, true); }
-      });
-    } catch (error) { toast(error.message, true); }
-  });
-
-  $("#auth-upgrade-form").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const base = new URL(center.target.base_url);
-    const capabilities = ["PUBLIC_HTTP_OBSERVE"];
-    if (form.get("browser")) capabilities.push("BROWSER_QA");
-    if (form.get("remediation")) capabilities.push("SOURCE_REMEDIATION");
-    try {
-      await api(`/v1/platform/workspaces/${state.workspaceId}/targets/${targetId}/authorization-center`, {
-        method: "POST",
-        body: JSON.stringify({
-          mode: form.get("mode"),
-          allowedHosts: [base.hostname],
-          allowedCapabilities: capabilities,
-          evidenceReference: form.get("evidenceReference") || null,
-          expiresAt: form.get("expiresAt") ? new Date(form.get("expiresAt")).toISOString() : null,
-        }),
-      });
-      toast("Authorization replaced");
-      modal.close();
-      await render();
-    } catch (error) { toast(error.message, true); }
-  });
-  $("#auth-revoke").addEventListener("click", async () => {
-    try {
-      await api(`/v1/platform/workspaces/${state.workspaceId}/targets/${targetId}/authorization/revoke`, {
-        method: "POST",
-        body: JSON.stringify({}),
-      });
-      toast("Authorization revoked");
-      modal.close();
-      await render();
-    } catch (error) { toast(error.message, true); }
-  });
+function openAuthorizationCenter(targetId) {
+  navigateConsole("/console/targets/" + targetId);
 }
 
 async function renderOperator() {
@@ -944,6 +872,10 @@ $("#workspace-select").addEventListener("change",async(event)=>{
   sessionStorage.setItem("mecord_workspace",state.workspaceId);
   if (state.view === "findingDetail") {
     navigateConsole("/console/findings");
+    return;
+  }
+  if (state.view === "targetDetail") {
+    navigateConsole("/console/targets");
     return;
   }
   if (state.view === "approvalDetail") {

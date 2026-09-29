@@ -29,6 +29,7 @@ import {
   markMonitoringPolicyQueued,
   recordMonitoringFailure,
   recordMonitoringRunFromLease,
+  getActiveLease,
   recordOperationalEvent,
   recordRepairOutcome,
   setMonitoringPolicyEnabled,
@@ -140,18 +141,27 @@ export async function handleMilestoneBRoute({
   if (req.method === "POST" && match) {
     const body = await readJson(req);
     if (!validId(body.policyId)) throw badRequest("policyId is invalid");
-    await recordMonitoringFailure({
+    if (!body.workerId?.trim()) throw badRequest("workerId is required");
+    const recorded = await recordMonitoringFailure({
       policyId: body.policyId,
       jobId: match[1],
-      targetId: body.targetId || null,
+      workerId: body.workerId.trim(),
       error: body.error || {},
     });
-    return json(res, 201, { recorded: true });
+    if (!recorded) {
+      return json(res, 409, { error: "LEASE_NOT_OWNED_OR_EXPIRED" });
+    }
+    return json(res, 201, recorded);
   }
 
   match = url.pathname.match(/^\/v1\/worker\/milestone-b\/jobs\/([0-9a-f-]+)\/repair-outcome$/i);
   if (req.method === "POST" && match) {
     const body = await readJson(req);
+    if (!body.workerId?.trim()) throw badRequest("workerId is required");
+    const lease = await getActiveLease(match[1], body.workerId.trim());
+    if (!lease) {
+      return json(res, 409, { error: "LEASE_NOT_OWNED_OR_EXPIRED" });
+    }
     if (!validId(body.remediationRequestId)) {
       throw badRequest("remediationRequestId is invalid");
     }

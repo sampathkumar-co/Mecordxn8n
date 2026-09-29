@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 const paths = [
   "package.json",
   "n8n/workflows/job-intake.json",
+  "n8n/workflows/public-http-dispatch.json",
 ];
 
 for (const path of paths) {

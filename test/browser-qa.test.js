@@ -57,6 +57,11 @@ test("browser findings keep same-site failures and deduplicate repeated signals"
       },
     ],
     requestFailures: [],
+    dom: {
+      brokenImageCount: 0,
+      brokenImages: [],
+      horizontalOverflowPx: 0,
+    },
   };
 
   const findings = buildBrowserFindings(observation);
@@ -78,6 +83,44 @@ test("browser findings keep same-site failures and deduplicate repeated signals"
   );
 });
 
+test("rendering evidence creates bounded broken-image and overflow findings", () => {
+  const observation = {
+    requestedUrl: "https://example.com/",
+    finalUrl: "https://example.com/",
+    viewport: "mobile",
+    pageErrors: [],
+    consoleErrors: [],
+    httpErrors: [],
+    requestFailures: [],
+    artifact: {
+      type: "screenshot",
+      path: "/artifacts/test-mobile.png",
+      sha256: "a".repeat(64),
+      byteLength: 1234,
+    },
+    dom: {
+      brokenImageCount: 2,
+      brokenImages: [
+        { src: "https://example.com/a.png", alt: "A" },
+        { src: "https://example.com/b.png", alt: "B" },
+      ],
+      horizontalOverflowPx: 37,
+    },
+  };
+
+  const findings = buildBrowserFindings(observation);
+  assert.equal(findings.length, 2);
+  assert.ok(
+    findings.some((item) => item.category === "browser-rendering"),
+  );
+  assert.ok(findings.some((item) => item.category === "browser-layout"));
+  assert.ok(
+    findings.every(
+      (item) => item.evidence.screenshot?.sha256 === "a".repeat(64),
+    ),
+  );
+});
+
 test("browser evidence text is bounded", () => {
   const observation = {
     requestedUrl: "https://example.com/",
@@ -87,6 +130,11 @@ test("browser evidence text is bounded", () => {
     consoleErrors: [{ text: "x".repeat(5000) }],
     httpErrors: [],
     requestFailures: [],
+    dom: {
+      brokenImageCount: 0,
+      brokenImages: [],
+      horizontalOverflowPx: 0,
+    },
   };
 
   const [finding] = buildBrowserFindings(observation);

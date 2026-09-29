@@ -243,7 +243,9 @@ export async function runPublicHttpObserverOnce({
       job: completed,
     };
   } catch (error) {
-    if (job.input?.monitoringPolicyId) {
+    const finalAttempt =
+      Number(job.attemptCount || 0) >= Number(job.maxAttempts || 3);
+    if (job.input?.monitoringPolicyId && finalAttempt) {
       await recordMonitoringFailure({
         controlApiUrl,
         workerToken,

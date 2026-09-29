@@ -7,7 +7,7 @@ const root = path.resolve(
   "../../web/console",
 );
 
-const SHELL_ROUTE = /^\/console(?:\/(?:home|launch|targets(?:\/[0-9a-f-]{36})?|findings(?:\/[0-9a-f-]{36})?|approvals|revenue|runs|integrations|workspace\/(?:access|audit)|operator))?\/?$/i;
+const SHELL_ROUTE = /^\/console(?:\/(?:home|launch|targets(?:\/[0-9a-f-]{36})?|findings(?:\/[0-9a-f-]{36})?|approvals(?:\/[0-9a-f-]{36})?|revenue|runs|integrations|workspace\/(?:access|audit)|operator))?\/?$/i;
 const ASSET_PREFIXES = [
   "/console/core/",
   "/console/components/",

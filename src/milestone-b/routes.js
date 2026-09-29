@@ -25,6 +25,7 @@ import {
   findRemediationByApprovalId,
   getApprovalRequest,
   getOperationalMetrics,
+  getRemediationRequestForJob,
   listMonitoringPolicies,
   listOpenRegressions,
   lookupRepairPatterns,
@@ -184,6 +185,15 @@ export async function handleMilestoneBRoute({
     const lease = await getActiveLease(match[1], body.workerId.trim());
     if (!lease) {
       return json(res, 409, { error: "LEASE_NOT_OWNED_OR_EXPIRED" });
+    }
+    const remediationRequest = await getRemediationRequestForJob(match[1]);
+    if (
+      !remediationRequest ||
+      remediationRequest.id !== body.remediationRequestId ||
+      remediationRequest.finding_id !== body.findingId ||
+      lease.input?.findingId !== body.findingId
+    ) {
+      return json(res, 409, { error: "REPAIR_OUTCOME_CONTEXT_MISMATCH" });
     }
     if (!validId(body.remediationRequestId)) {
       throw badRequest("remediationRequestId is invalid");

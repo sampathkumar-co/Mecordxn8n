@@ -200,14 +200,37 @@ test(
       [[assessed.body.jobs.http.id, assessed.body.jobs.browser.id]],
     );
 
-    const finalized = await request("/v1/maintenance/onboarding", {
-      method: "POST",
-      token: ORCHESTRATOR_TOKEN,
-      body: {},
-    });
-    assert.equal(finalized.status, 200);
-    assert.equal(finalized.body.finalized, 1);
-    const reportId = finalized.body.reports[0].reportId;
+    const finalizationRuns = await Promise.all([
+      request("/v1/maintenance/onboarding", {
+        method: "POST",
+        token: ORCHESTRATOR_TOKEN,
+        body: {},
+      }),
+      request("/v1/maintenance/onboarding", {
+        method: "POST",
+        token: ORCHESTRATOR_TOKEN,
+        body: {},
+      }),
+    ]);
+    assert.ok(finalizationRuns.every((item) => item.status === 200));
+    assert.equal(
+      finalizationRuns.reduce(
+        (sum, item) => sum + Number(item.body.finalized || 0),
+        0,
+      ),
+      1,
+    );
+    const reportResult = finalizationRuns.find(
+      (item) => item.body.reports?.length > 0,
+    );
+    const reportId = reportResult.body.reports[0].reportId;
+    const reportCount = await pool.query(
+      `SELECT COUNT(*)::int AS count
+         FROM reports
+        WHERE target_id = $1 AND kind = 'CLIENT_PROPOSAL'`,
+      [targetId],
+    );
+    assert.equal(reportCount.rows[0].count, 1);
 
     const refreshed = await request(
       "/v1/platform/workspaces/" + workspaceId + "/onboarding",
@@ -360,5 +383,31 @@ test(
     const adminAllowed = await request("/v1/platform/admin/overview", { token });
     assert.equal(adminAllowed.status, 200);
     assert.ok(adminAllowed.body.summary.active_workspaces >= 1);
+  },
+);
+
+test(
+  "duplicate self-serve signup returns a generic conflict without email enumeration detail",
+  { skip: !enabled },
+  async () => {
+    const suffix = randomUUID().slice(0, 8);
+    const body = {
+      email: "duplicate-" + suffix + "@example.test",
+      displayName: "Duplicate Owner",
+      password: "Milestone-H-password-12345",
+      workspaceName: "Duplicate " + suffix,
+      workspaceSlug: "duplicate-" + suffix,
+    };
+    const first = await request("/v1/platform/auth/signup", {
+      method: "POST",
+      body,
+    });
+    assert.equal(first.status, 201);
+    const second = await request("/v1/platform/auth/signup", {
+      method: "POST",
+      body: { ...body, workspaceSlug: "different-" + suffix },
+    });
+    assert.equal(second.status, 409);
+    assert.deepEqual(second.body, { error: "SIGNUP_CONFLICT" });
   },
 );

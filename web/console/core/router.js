@@ -12,6 +12,7 @@ const routes = [
   [new RegExp("^/console/approvals/(" + UUID + ")/?$", "i"), (match) => ({ view: "approvalDetail", params: { approvalId: match[1] }, path: "/console/approvals/" + match[1] })],
   [/^\/console\/revenue\/?$/, () => ({ view: "pipeline", params: {}, path: "/console/revenue" })],
   [/^\/console\/runs\/?$/, () => ({ view: "operations", params: {}, path: "/console/runs" })],
+  [new RegExp("^/console/runs/(" + UUID + ")/?$", "i"), (match) => ({ view: "runDetail", params: { jobId: match[1] }, path: "/console/runs/" + match[1] })],
   [/^\/console\/integrations\/?$/, () => ({ view: "integrations", params: {}, path: "/console/integrations" })],
   [/^\/console\/workspace\/access\/?$/, () => ({ view: "team", params: {}, path: "/console/workspace/access" })],
   [/^\/console\/workspace\/audit\/?$/, () => ({ view: "audit", params: {}, path: "/console/workspace/audit" })],

@@ -484,6 +484,8 @@ export async function listWorkspaceOperations(workspaceId, limit = 100) {
     pool.query(
       `SELECT j.id, j.target_id, t.organization_name, j.job_type,
               j.capability, j.state, j.attempt_count, j.max_attempts,
+              j.next_attempt_at, j.last_heartbeat_at,
+              NULLIF(j.error->>'code','') AS error_code,
               j.cost_units, j.created_at, j.started_at, j.completed_at
          FROM jobs j
          JOIN targets t ON t.id = j.target_id

@@ -345,7 +345,7 @@ test(
       "/v1/platform/workspaces/" + workspaceId + "/billing/checkout",
       { method: "POST", token, body: { plan: "TEAM" } },
     );
-    assert.equal(billing.status, 503);
+    assert.equal(billing.status, 424);
     assert.equal(billing.body.error, "BILLING_NOT_CONFIGURED");
 
     const adminDenied = await request("/v1/platform/admin/overview", { token });

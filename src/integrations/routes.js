@@ -10,11 +10,15 @@ import {
 } from "../platform/auth.js";
 import {
   applyStripeSubscriptionEvent,
+  completeIntegrationDelivery,
   createIntegrationConnection,
+  enqueueDueRenewalIntegrationEvents,
   enqueueIntegrationTest,
   getIntegrationConnection,
   getIntegrationMetrics,
+  leaseIntegrationDelivery,
   listIntegrationConnections,
+  markIntegrationWebhookReceiptProcessed,
   recordIntegrationWebhookReceipt,
   setIntegrationConnectionStatus,
 } from "./repository.js";
@@ -26,10 +30,7 @@ import {
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-function validId(value) {
-  return UUID_RE.test(String(value || ""));
-}
+const MAX_WEBHOOK_BODY = 512 * 1024;
 
 function constantEqual(a, b) {
   const left = Buffer.from(String(a || ""));
@@ -41,13 +42,27 @@ function constantEqual(a, b) {
   );
 }
 
-async function requireWorkspace(principal, workspaceId, rule = {}) {
-  if (!validId(workspaceId)) {
-    const error = new Error("workspace id is invalid");
-    error.statusCode = 400;
-    error.code = "INVALID_WORKSPACE_ID";
-    throw error;
+function pathParts(url) {
+  return url.pathname.split("/").filter(Boolean);
+}
+
+async function readRawBody(req) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > MAX_WEBHOOK_BODY) {
+      const error = new Error("webhook body too large");
+      error.statusCode = 413;
+      error.code = "WEBHOOK_BODY_TOO_LARGE";
+      throw error;
+    }
+    chunks.push(chunk);
   }
+  return Buffer.concat(chunks);
+}
+
+async function requireWorkspace(principal, workspaceId, rule) {
   const access = await getWorkspaceAccess(principal, workspaceId);
   if (!access || !accessAllows(access, rule)) {
     const error = new Error("workspace access denied");
@@ -58,11 +73,19 @@ async function requireWorkspace(principal, workspaceId, rule = {}) {
   return access;
 }
 
-function boundedString(value, max, name, badRequest, { required = false } = {}) {
-  const text = String(value || "").trim();
-  if (required && !text) throw badRequest(`${name} is required`);
-  if (text.length > max) throw badRequest(`${name} is too long`);
-  return text || null;
+function parseStripeSignature(header) {
+  const values = {};
+  for (const item of String(header || "").split(",")) {
+    const index = item.indexOf("=");
+    if (index <= 0) continue;
+    const key = item.slice(0, index).trim();
+    const value = item.slice(index + 1).trim();
+    (values[key] ||= []).push(value);
+  }
+  return {
+    timestamp: values.t?.[0] || null,
+    signatures: values.v1 || [],
+  };
 }
 
 export async function handleIntegrationPlatformRoute({
@@ -74,23 +97,33 @@ export async function handleIntegrationPlatformRoute({
   badRequest,
   principal,
 }) {
-  let match;
+  const path = pathParts(url);
+  if (
+    path.length < 5 ||
+    path[0] !== "v1" ||
+    path[1] !== "platform" ||
+    path[2] !== "workspaces" ||
+    !UUID_RE.test(path[3]) ||
+    path[4] !== "integrations"
+  ) {
+    return false;
+  }
 
-  match = url.pathname.match(
-    /^\/v1\/platform\/workspaces\/([0-9a-f-]+)\/integrations$/i,
-  );
-  if (req.method === "GET" && match) {
-    await requireWorkspace(principal, match[1], {
+  const workspaceId = path[3];
+
+  if (path.length === 5 && req.method === "GET") {
+    await requireWorkspace(principal, workspaceId, {
       minimumRole: "VIEWER",
       apiScope: "workspace:read",
     });
     return json(res, 200, {
-      integrations: await listIntegrationConnections(match[1]),
+      integrations: await listIntegrationConnections(workspaceId),
+      metrics: await getIntegrationMetrics(workspaceId),
     });
   }
 
-  if (req.method === "POST" && match) {
-    await requireWorkspace(principal, match[1], {
+  if (path.length === 5 && req.method === "POST") {
+    await requireWorkspace(principal, workspaceId, {
       minimumRole: "ADMIN",
       apiScope: "integrations:write",
     });
@@ -102,16 +135,19 @@ export async function handleIntegrationPlatformRoute({
     if (!INTEGRATION_PROVIDERS.includes(provider)) {
       throw badRequest("integration provider is invalid");
     }
-    const config = await validateIntegrationConfig(provider, body.config);
+    const name = String(body.name || "").trim();
+    if (!name || name.length > 160) throw badRequest("name is invalid");
+    const config = await validateIntegrationConfig(provider, body.config || {});
     const subscribedEvents = validateSubscribedEvents(
       body.subscribedEvents || [],
     );
+    if (provider === "STRIPE" && subscribedEvents.length > 0) {
+      throw badRequest("Stripe is inbound-only in V1");
+    }
     const connection = await createIntegrationConnection({
-      workspaceId: match[1],
+      workspaceId,
       provider,
-      name: boundedString(body.name, 160, "name", badRequest, {
-        required: true,
-      }),
+      name,
       config,
       subscribedEvents,
       createdBy: principal.userId,
@@ -119,19 +155,20 @@ export async function handleIntegrationPlatformRoute({
     return json(res, 201, connection);
   }
 
-  match = url.pathname.match(
-    /^\/v1\/platform\/workspaces\/([0-9a-f-]+)\/integrations\/([0-9a-f-]+)\/(enable|disable)$/i,
-  );
-  if (req.method === "POST" && match) {
-    await requireWorkspace(principal, match[1], {
+  if (
+    path.length === 7 &&
+    UUID_RE.test(path[5]) &&
+    ["enable", "disable"].includes(path[6]) &&
+    req.method === "POST"
+  ) {
+    await requireWorkspace(principal, workspaceId, {
       minimumRole: "ADMIN",
       apiScope: "integrations:write",
     });
-    const status = match[3].toLowerCase() === "enable" ? "ACTIVE" : "DISABLED";
     const connection = await setIntegrationConnectionStatus({
-      workspaceId: match[1],
-      connectionId: match[2],
-      status,
+      workspaceId,
+      connectionId: path[5],
+      status: path[6] === "enable" ? "ACTIVE" : "DISABLED",
     });
     if (!connection) {
       return json(res, 404, { error: "INTEGRATION_NOT_FOUND" });
@@ -139,33 +176,29 @@ export async function handleIntegrationPlatformRoute({
     return json(res, 200, connection);
   }
 
-  match = url.pathname.match(
-    /^\/v1\/platform\/workspaces\/([0-9a-f-]+)\/integrations\/([0-9a-f-]+)\/test$/i,
-  );
-  if (req.method === "POST" && match) {
-    await requireWorkspace(principal, match[1], {
+  if (
+    path.length === 7 &&
+    UUID_RE.test(path[5]) &&
+    path[6] === "test" &&
+    req.method === "POST"
+  ) {
+    await requireWorkspace(principal, workspaceId, {
       minimumRole: "ADMIN",
       apiScope: "integrations:write",
     });
+    const context = await getIntegrationConnection(path[5], workspaceId);
+    if (!context) return json(res, 404, { error: "INTEGRATION_NOT_FOUND" });
+    if (context.connection.provider === "STRIPE") {
+      return json(res, 409, { error: "PROVIDER_INBOUND_ONLY" });
+    }
     const queued = await enqueueIntegrationTest({
-      workspaceId: match[1],
-      connectionId: match[2],
+      workspaceId,
+      connectionId: path[5],
     });
     if (!queued) {
-      return json(res, 404, { error: "INTEGRATION_NOT_FOUND_OR_DISABLED" });
+      return json(res, 409, { error: "INTEGRATION_NOT_ACTIVE" });
     }
     return json(res, 202, queued);
-  }
-
-  match = url.pathname.match(
-    /^\/v1\/platform\/workspaces\/([0-9a-f-]+)\/integrations\/metrics$/i,
-  );
-  if (req.method === "GET" && match) {
-    await requireWorkspace(principal, match[1], {
-      minimumRole: "VIEWER",
-      apiScope: "workspace:read",
-    });
-    return json(res, 200, await getIntegrationMetrics(match[1]));
   }
 
   return false;
@@ -176,111 +209,245 @@ export async function handleIntegrationWebhookRoute({
   res,
   url,
   json,
-  readRaw,
 }) {
-  const match = url.pathname.match(
-    /^\/v1\/integrations\/webhooks\/([0-9a-f-]+)\/(stripe|github)$/i,
-  );
-  if (req.method !== "POST" || !match) return false;
-  if (!validId(match[1])) return json(res, 404, { error: "NOT_FOUND" });
-
-  const context = await getIntegrationConnection(match[1]);
-  if (!context) return json(res, 404, { error: "INTEGRATION_NOT_FOUND" });
-
-  const provider = match[2].toUpperCase();
-  if (context.connection.provider !== provider) {
-    return json(res, 409, { error: "INTEGRATION_PROVIDER_MISMATCH" });
+  if (req.method !== "POST") return false;
+  const path = pathParts(url);
+  if (
+    path.length !== 5 ||
+    path[0] !== "v1" ||
+    path[1] !== "integrations" ||
+    path[2] !== "webhooks" ||
+    !UUID_RE.test(path[3]) ||
+    !["github", "stripe"].includes(path[4])
+  ) {
+    return false;
   }
 
-  const raw = await readRaw(req, 256 * 1024);
+  const connectionId = path[3];
+  const providerName = path[4].toUpperCase();
+  const context = await getIntegrationConnection(connectionId);
+  if (!context || context.connection.status !== "ACTIVE") {
+    return json(res, 404, { error: "INTEGRATION_NOT_FOUND" });
+  }
+  if (context.connection.provider !== providerName) {
+    return json(res, 404, { error: "WEBHOOK_PROVIDER_MISMATCH" });
+  }
+
+  const raw = await readRawBody(req);
   const payloadSha256 = createHash("sha256").update(raw).digest("hex");
-  let signatureValid = false;
-  let providerEventId = null;
-  let eventType = "unknown";
-  let parsed = null;
 
-  if (provider === "STRIPE") {
-    const signatureHeader = String(req.headers["stripe-signature"] || "");
-    const parts = Object.fromEntries(
-      signatureHeader
-        .split(",")
-        .map((part) => part.split("="))
-        .filter((part) => part.length === 2),
-    );
-    const timestamp = parts.t;
-    const signature = parts.v1;
-    if (timestamp && signature) {
-      const expected = createHmac("sha256", context.config.webhookSecret)
-        .update(`${timestamp}.${raw.toString("utf8")}`)
+  if (providerName === "GITHUB") {
+    if (!context.config.webhookSecret) {
+      return json(res, 409, { error: "GITHUB_WEBHOOK_NOT_CONFIGURED" });
+    }
+    const supplied = String(req.headers["x-hub-signature-256"] || "");
+    const expected =
+      "sha256=" +
+      createHmac("sha256", context.config.webhookSecret)
+        .update(raw)
         .digest("hex");
-      const ageSeconds = Math.abs(Date.now() / 1000 - Number(timestamp));
-      signatureValid = ageSeconds <= 300 && constantEqual(signature, expected);
+    if (!constantEqual(supplied, expected)) {
+      await recordIntegrationWebhookReceipt({
+        connectionId,
+        eventType: "unknown",
+        payloadSha256,
+        signatureValid: false,
+        processedState: "IGNORED",
+      });
+      return json(res, 401, { error: "INVALID_WEBHOOK_SIGNATURE" });
     }
-  } else {
-    const secret = context.config.webhookSecret;
-    const signature = String(req.headers["x-hub-signature-256"] || "");
-    if (secret && signature.startsWith("sha256=")) {
-      const expected = createHmac("sha256", secret).update(raw).digest("hex");
-      signatureValid = constantEqual(signature.slice(7), expected);
-    }
+
+    const providerEventId =
+      String(req.headers["x-github-delivery"] || "").slice(0, 240) || null;
+    const eventType =
+      String(req.headers["x-github-event"] || "unknown").slice(0, 200);
+    const receipt = await recordIntegrationWebhookReceipt({
+      connectionId,
+      providerEventId,
+      eventType,
+      payloadSha256,
+      signatureValid: true,
+      processedState: "RECORDED",
+    });
+    if (!receipt) return json(res, 200, { accepted: true, duplicate: true });
+    await markIntegrationWebhookReceiptProcessed({
+      receiptId: receipt.id,
+      processedState: "PROCESSED",
+    });
+    return json(res, 202, { accepted: true, duplicate: false });
   }
 
-  if (!signatureValid) {
+  const parsedSignature = parseStripeSignature(req.headers["stripe-signature"]);
+  const timestamp = Number(parsedSignature.timestamp);
+  if (
+    !Number.isFinite(timestamp) ||
+    Math.abs(Date.now() / 1000 - timestamp) > 300
+  ) {
+    return json(res, 401, { error: "INVALID_WEBHOOK_SIGNATURE" });
+  }
+  const signed = Buffer.concat([
+    Buffer.from(String(timestamp) + ".", "utf8"),
+    raw,
+  ]);
+  const expected = createHmac("sha256", context.config.webhookSecret)
+    .update(signed)
+    .digest("hex");
+  if (
+    !parsedSignature.signatures.some((signature) =>
+      constantEqual(signature, expected),
+    )
+  ) {
     await recordIntegrationWebhookReceipt({
-      connectionId: context.connection.id,
-      eventType,
+      connectionId,
+      eventType: "unknown",
       payloadSha256,
       signatureValid: false,
       processedState: "IGNORED",
     });
-    return json(res, 401, { error: "WEBHOOK_SIGNATURE_INVALID" });
+    return json(res, 401, { error: "INVALID_WEBHOOK_SIGNATURE" });
   }
+
+  let event;
+  try {
+    event = JSON.parse(raw.toString("utf8"));
+  } catch {
+    return json(res, 400, { error: "INVALID_WEBHOOK_JSON" });
+  }
+
+  const providerEventId = String(event?.id || "").slice(0, 240) || null;
+  const eventType = String(event?.type || "unknown").slice(0, 200);
+  const receipt = await recordIntegrationWebhookReceipt({
+    connectionId,
+    providerEventId,
+    eventType,
+    payloadSha256,
+    signatureValid: true,
+    processedState: "RECORDED",
+  });
+  if (!receipt) return json(res, 200, { accepted: true, duplicate: true });
 
   try {
-    parsed = JSON.parse(raw.toString("utf8"));
-  } catch {
-    return json(res, 400, { error: "INVALID_JSON" });
-  }
-
-  if (provider === "STRIPE") {
-    providerEventId = parsed.id ? String(parsed.id).slice(0, 240) : null;
-    eventType = String(parsed.type || "unknown").slice(0, 200);
-    const workspaceId =
-      parsed.data?.object?.metadata?.workspace_id ||
-      parsed.data?.object?.metadata?.mecord_workspace_id ||
-      null;
     if (
-      workspaceId &&
-      validId(workspaceId) &&
       [
         "customer.subscription.created",
         "customer.subscription.updated",
         "customer.subscription.deleted",
       ].includes(eventType)
     ) {
+      const metadataWorkspace =
+        event?.data?.object?.metadata?.workspace_id ||
+        event?.data?.object?.metadata?.mecord_workspace_id ||
+        null;
+      if (
+        metadataWorkspace &&
+        metadataWorkspace !== context.connection.workspaceId
+      ) {
+        const error = new Error("Stripe workspace metadata mismatch");
+        error.statusCode = 409;
+        error.code = "STRIPE_WORKSPACE_MISMATCH";
+        throw error;
+      }
       await applyStripeSubscriptionEvent({
-        workspaceId,
+        workspaceId: context.connection.workspaceId,
         eventType,
-        subscription: parsed.data.object,
+        subscription: event?.data?.object || {},
       });
     }
-  } else {
-    providerEventId = req.headers["x-github-delivery"]
-      ? String(req.headers["x-github-delivery"]).slice(0, 240)
-      : null;
-    eventType = req.headers["x-github-event"]
-      ? String(req.headers["x-github-event"]).slice(0, 200)
-      : "unknown";
+    await markIntegrationWebhookReceiptProcessed({
+      receiptId: receipt.id,
+      processedState: "PROCESSED",
+    });
+    return json(res, 202, { accepted: true, duplicate: false });
+  } catch (error) {
+    await markIntegrationWebhookReceiptProcessed({
+      receiptId: receipt.id,
+      processedState: "FAILED",
+    });
+    throw error;
+  }
+}
+
+export async function handleIntegrationWorkerRoute({
+  req,
+  res,
+  url,
+  json,
+  readJson,
+  badRequest,
+}) {
+  const path = pathParts(url);
+  if (
+    path[0] !== "v1" ||
+    path[1] !== "worker" ||
+    path[2] !== "integrations"
+  ) {
+    return false;
   }
 
-  await recordIntegrationWebhookReceipt({
-    connectionId: context.connection.id,
-    providerEventId,
-    eventType,
-    payloadSha256,
-    signatureValid: true,
-    processedState: "PROCESSED",
-  });
+  if (req.method === "POST" && path.length === 4 && path[3] === "lease") {
+    const body = await readJson(req);
+    const workerId = String(body.workerId || "").trim();
+    const leaseSeconds = Number(body.leaseSeconds || 60);
+    if (
+      !workerId ||
+      workerId.length > 160 ||
+      !Number.isInteger(leaseSeconds) ||
+      leaseSeconds < 15 ||
+      leaseSeconds > 300
+    ) {
+      throw badRequest("integration lease request is invalid");
+    }
+    const delivery = await leaseIntegrationDelivery({
+      workerId,
+      leaseSeconds,
+    });
+    if (!delivery) return json(res, 204, {});
+    return json(res, 200, delivery);
+  }
 
-  return json(res, 202, { accepted: true });
+  if (
+    req.method === "POST" &&
+    path.length === 5 &&
+    UUID_RE.test(path[3]) &&
+    path[4] === "complete"
+  ) {
+    const body = await readJson(req);
+    const workerId = String(body.workerId || "").trim();
+    const state = String(body.state || "").trim().toUpperCase();
+    if (!workerId || !["SENT", "FAILED"].includes(state)) {
+      throw badRequest("integration completion is invalid");
+    }
+    const completed = await completeIntegrationDelivery({
+      deliveryId: path[3],
+      workerId,
+      state,
+      providerReference: body.providerReference
+        ? String(body.providerReference).slice(0, 1000)
+        : null,
+      errorCode: body.errorCode
+        ? String(body.errorCode).slice(0, 120)
+        : null,
+    });
+    if (!completed) {
+      return json(res, 409, { error: "LEASE_NOT_OWNED_OR_EXPIRED" });
+    }
+    return json(res, 200, completed);
+  }
+
+  if (
+    req.method === "POST" &&
+    path.length === 4 &&
+    path[3] === "maintenance"
+  ) {
+    const body = await readJson(req);
+    const limit = Math.min(
+      Math.max(Math.trunc(Number(body.limit) || 100), 1),
+      500,
+    );
+    return json(res, 200, {
+      renewalsQueued: await enqueueDueRenewalIntegrationEvents(limit),
+    });
+  }
+
+  return false;
 }

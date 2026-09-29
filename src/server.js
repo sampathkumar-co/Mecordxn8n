@@ -21,6 +21,13 @@ import {
 import { handleMilestoneARoute } from "./milestone-a/routes.js";
 import { handleMilestoneBRoute } from "./milestone-b/routes.js";
 import { handleMilestoneCRoute } from "./milestone-c/routes.js";
+import { authenticatePlatformToken } from "./platform/auth.js";
+import {
+  handlePlatformPublicRoute,
+  handlePlatformRoute,
+  runPlatformMaintenance,
+} from "./platform/routes.js";
+import { serveConsoleAsset } from "./platform/static.js";
 
 const MAX_BODY_BYTES = 256 * 1024;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -30,6 +37,12 @@ function json(res, statusCode, value) {
   res.writeHead(statusCode, {
     "content-type": "application/json; charset=utf-8",
     "content-length": Buffer.byteLength(body),
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "referrer-policy": "no-referrer",
+    "permissions-policy": "camera=(), microphone=(), geolocation=()",
+    "cross-origin-opener-policy": "same-origin",
+    "cross-origin-resource-policy": "same-origin",
   });
   res.end(body);
 }
@@ -40,10 +53,13 @@ function secureTokenEqual(actual, expected) {
   return a.length === b.length && a.length > 0 && timingSafeEqual(a, b);
 }
 
-function requireBearer(req, expectedToken) {
+function bearerToken(req) {
   const header = req.headers.authorization || "";
-  const token = header.startsWith("Bearer ") ? header.slice(7) : "";
-  return secureTokenEqual(token, expectedToken);
+  return header.startsWith("Bearer ") ? header.slice(7) : "";
+}
+
+function requireBearer(req, expectedToken) {
+  return secureTokenEqual(bearerToken(req), expectedToken);
 }
 
 async function readJson(req) {
@@ -252,6 +268,7 @@ function badRequest(message) {
 export function createServer({
   orchestratorToken = process.env.ORCHESTRATOR_TOKEN,
   workerToken = process.env.WORKER_TOKEN,
+  bootstrapToken = process.env.BOOTSTRAP_TOKEN,
 } = {}) {
   if (!orchestratorToken) {
     throw new Error("ORCHESTRATOR_TOKEN is required");
@@ -273,9 +290,52 @@ export function createServer({
         return json(res, 200, { ok: true, database: "ready" });
       }
 
+      if (url.pathname.startsWith("/console")) {
+        const served = await serveConsoleAsset(req, res, url);
+        if (served) return;
+      }
+
+      if (url.pathname.startsWith("/v1/platform/")) {
+        const rawBearer = bearerToken(req);
+        const publicHandled = await handlePlatformPublicRoute({
+          req,
+          res,
+          url,
+          json,
+          readJson,
+          badRequest,
+          bootstrapToken,
+          bearerToken: rawBearer,
+        });
+        if (publicHandled !== false) return;
+
+        const principal = await authenticatePlatformToken(rawBearer);
+        if (!principal) {
+          return json(res, 401, { error: "PLATFORM_UNAUTHORIZED" });
+        }
+        const platformHandled = await handlePlatformRoute({
+          req,
+          res,
+          url,
+          json,
+          readJson,
+          badRequest,
+          principal,
+        });
+        if (platformHandled !== false) return;
+        return json(res, 404, { error: "NOT_FOUND" });
+      }
+
       const workerRoute = url.pathname.startsWith("/v1/worker/");
       if (!requireBearer(req, workerRoute ? workerToken : orchestratorToken)) {
         return json(res, 401, { error: "UNAUTHORIZED" });
+      }
+
+      if (
+        req.method === "POST" &&
+        url.pathname === "/v1/maintenance/platform"
+      ) {
+        return json(res, 200, await runPlatformMaintenance());
       }
 
       const milestoneCHandled = await handleMilestoneCRoute({

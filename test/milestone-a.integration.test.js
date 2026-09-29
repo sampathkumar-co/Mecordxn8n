@@ -179,11 +179,28 @@ test("Milestone A reaches verified opportunity, report, and remediation queue", 
     `/v1/findings/${findingRes.body.id}/remediate`,
     {
       method: "POST",
-      body: { projectRoot: "C:\\authorized\\client" }
+      body: {
+        projectRoot: "C:\\authorized\\client",
+        requestedBy: "milestone-a-test"
+      }
     }
   );
-  assert.equal(remediation.status, 201);
-  assert.equal(remediation.body.job.capability, CAPABILITIES.SOURCE_REMEDIATION);
+  assert.equal(remediation.status, 202);
+  assert.equal(remediation.body.approvalRequired, true);
+
+  const approved = await request(
+    `/v1/approvals/${remediation.body.approval.id}/approve`,
+    {
+      method: "POST",
+      body: { decidedBy: "integration-human" }
+    }
+  );
+  assert.equal(approved.status, 201);
+  assert.equal(approved.body.job.capability, CAPABILITIES.SOURCE_REMEDIATION);
+  assert.equal(
+    approved.body.job.input.approvalId,
+    remediation.body.approval.id,
+  );
 });
 
 test("new Milestone A routes return 403 when capability is not granted", { skip: !enabled }, async () => {

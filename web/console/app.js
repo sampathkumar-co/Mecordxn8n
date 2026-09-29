@@ -1,8 +1,17 @@
+import {
+  findingPath,
+  navigateConsole,
+  parseConsoleRoute,
+  pathForView,
+} from "/console/core/router.js";
+import { renderFindingDetailView } from "/console/views/finding-detail.js";
+
 const state = {
   token: sessionStorage.getItem("mecord_session") || "",
   me: null,
   workspaceId: sessionStorage.getItem("mecord_workspace") || "",
   view: "overview",
+  params: {},
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -152,6 +161,11 @@ function showApp() {
   appView.classList.remove("hidden");
 }
 
+function applyRoute(route) {
+  state.view = route.view;
+  state.params = route.params || {};
+}
+
 async function boot() {
   if (!state.token) return showAuth();
   try {
@@ -161,6 +175,11 @@ async function boot() {
     if (!workspaces.some((item) => item.id === state.workspaceId)) {
       state.workspaceId = workspaces[0].id;
       sessionStorage.setItem("mecord_workspace", state.workspaceId);
+    }
+    const route = parseConsoleRoute();
+    applyRoute(route);
+    if (route.notFound || window.location.pathname === "/console" || window.location.pathname === "/console/") {
+      window.history.replaceState({}, "", route.path);
     }
     hydrateShell();
     showApp();
@@ -194,10 +213,11 @@ function currentWorkspace() {
 }
 
 const viewMeta = {
-  overview: ["WORKSPACE", "Overview", "Add target"],
+  overview: ["WORKSPACE", "Home", "Add target"],
   launch: ["GO LIVE", "Launch", "Refresh"],
   targets: ["ASSETS", "Targets", "Add target"],
   findings: ["EVIDENCE", "Findings", "Refresh"],
+  findingDetail: ["ENGINEERING", "Finding", "Refresh"],
   approvals: ["HUMAN GATES", "Approvals", "Refresh"],
   pipeline: ["COMMERCIAL", "Pipeline", "Refresh"],
   operations: ["RUNTIME", "Operations", "Refresh"],
@@ -207,13 +227,30 @@ const viewMeta = {
   operator: ["PLATFORM", "Operator", "Refresh"],
 };
 
+const breadcrumbForView = {
+  overview: "Workspace / Home",
+  launch: "Workspace / Launch",
+  targets: "Workspace / Engineering / Targets",
+  findings: "Workspace / Engineering / Findings",
+  findingDetail: "Workspace / Engineering / Findings / Detail",
+  operations: "Workspace / Engineering / Runs",
+  approvals: "Workspace / Repair / Approval inbox",
+  pipeline: "Workspace / Revenue / Opportunities",
+  integrations: "Workspace / Integrations",
+  team: "Workspace / Team & Access",
+  audit: "Workspace / Audit",
+  operator: "Platform / Operator",
+};
+
 async function render() {
-  const [kicker, title, action] = viewMeta[state.view];
+  const [kicker, title, action] = viewMeta[state.view] || viewMeta.overview;
   $("#view-kicker").textContent = kicker;
   $("#view-title").textContent = title;
+  $("#breadcrumb").textContent = breadcrumbForView[state.view] || "Workspace";
   $("#primary-action").textContent = action;
+  const activeView = state.view === "findingDetail" ? "findings" : state.view;
   document.querySelectorAll(".nav-item").forEach((node) => {
-    node.classList.toggle("active", node.dataset.view === state.view);
+    node.classList.toggle("active", node.dataset.view === activeView);
   });
   loading();
   try {
@@ -222,6 +259,7 @@ async function render() {
       launch: renderLaunch,
       targets: renderTargets,
       findings: renderFindings,
+      findingDetail: renderFindingDetail,
       approvals: renderApprovals,
       pipeline: renderPipeline,
       operations: renderOperations,
@@ -582,27 +620,76 @@ async function renderFindings() {
     "Findings appear after authorized QA jobs produce evidence.",
   );
   document.querySelectorAll(".finding-open").forEach((button) => {
-    button.addEventListener("click", () => openFinding(button.dataset.id));
+    button.addEventListener("click", () => navigateConsole(findingPath(button.dataset.id)));
   });
 }
 
-async function openFinding(id) {
-  const item = await api(`/v1/platform/workspaces/${state.workspaceId}/findings/${id}`);
-  openModal("Finding evidence", "VERIFIED ENGINEERING SIGNAL", `
-    <div class="detail-grid">
-      ${detail("Severity", item.severity)}
-      ${detail("Status", item.status)}
-      ${detail("Verification", item.verification_state)}
-      ${detail("Occurrences", item.occurrences)}
-      ${detail("Affected URL", item.affected_url)}
-      ${detail("Opportunity score", item.opportunity_score ?? "—")}
+function openRepairRequest(finding) {
+  openModal("Request repair approval", "HUMAN-GATED SOURCE REMEDIATION", `
+    <div class="callout">
+      <strong>No source change happens from this request.</strong>
+      <p class="muted">This creates an approval request. Current authorization and finding verification are checked again before remediation can execute.</p>
     </div>
-    <h3>Evidence</h3>
-    <pre class="code-block">${escapeHtml(JSON.stringify(item.evidence || {}, null, 2))}</pre>
-    <h3>Verification history</h3>
-    <pre class="code-block">${escapeHtml(JSON.stringify(item.verifications || [], null, 2))}</pre>
-    <h3>Artifacts</h3>
-    <pre class="code-block">${escapeHtml(JSON.stringify(item.artifacts || [], null, 2))}</pre>`);
+    <form id="repair-request-form">
+      <div class="form-grid">
+        <label class="full">Authorized project root
+          <input name="projectRoot" maxlength="1000" placeholder="Authorized Mecord project root" required>
+        </label>
+        <label>Approval expires in
+          <select name="expiresMinutes">
+            <option value="60">1 hour</option>
+            <option value="120" selected>2 hours</option>
+            <option value="240">4 hours</option>
+            <option value="1440">24 hours</option>
+          </select>
+        </label>
+      </div>
+      <div class="form-actions">
+        <button id="repair-request-cancel" class="button" type="button">Cancel</button>
+        <button class="button primary" type="submit">Create approval request</button>
+      </div>
+    </form>
+  `);
+  $("#repair-request-cancel")?.addEventListener("click", () => modal.close());
+  $("#repair-request-form")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const submit = event.currentTarget.querySelector('button[type="submit"]');
+    submit.disabled = true;
+    try {
+      await api(`/v1/platform/workspaces/${state.workspaceId}/findings/${finding.id}/remediate`, {
+        method: "POST",
+        body: JSON.stringify({
+          projectRoot: form.get("projectRoot"),
+          expiresMinutes: Number(form.get("expiresMinutes")),
+        }),
+      });
+      modal.close();
+      toast("Repair approval requested");
+      navigateConsole("/console/approvals");
+    } catch (error) {
+      submit.disabled = false;
+      toast(error.message, true);
+    }
+  });
+}
+
+async function renderFindingDetail() {
+  if (!state.params.findingId) {
+    navigateConsole("/console/findings", { replace: true });
+    return;
+  }
+  await renderFindingDetailView({
+    container: content,
+    api,
+    workspaceId: state.workspaceId,
+    findingId: state.params.findingId,
+    workspace: currentWorkspace(),
+    fmtDate,
+    onBack: () => navigateConsole("/console/findings"),
+    onOpenAuthorization: openAuthorizationCenter,
+    onRequestRepair: openRepairRequest,
+  });
 }
 
 async function renderApprovals() {
@@ -798,7 +885,7 @@ function openTargetForm() {
           },
         }),
       });
-      modal.close();toast("Target registered");state.view="targets";await render();
+      modal.close();toast("Target registered");navigateConsole("/console/targets");
     } catch(error){toast(error.message,true);}
   });
 }
@@ -855,7 +942,7 @@ $("#signup-form").addEventListener("submit",async(event)=>{
     state.workspaceId=result.workspace.id;
     sessionStorage.setItem("mecord_session",state.token);
     sessionStorage.setItem("mecord_workspace",state.workspaceId);
-    state.view="launch";
+    window.history.replaceState({}, "", "/console/launch");
     await boot();
   }catch(error){toast(error.message,true);}
 });
@@ -881,10 +968,94 @@ $("#show-signup").addEventListener("click",()=>{$("#login-form").classList.add("
 $("#signup-back-login").addEventListener("click",()=>{$("#signup-form").classList.add("hidden");$("#login-form").classList.remove("hidden");});
 $("#show-bootstrap").addEventListener("click",()=>{$("#login-form").classList.add("hidden");$("#bootstrap-form").classList.remove("hidden");});
 $("#show-login").addEventListener("click",()=>{$("#bootstrap-form").classList.add("hidden");$("#login-form").classList.remove("hidden");});
-$("#workspace-select").addEventListener("change",async(event)=>{state.workspaceId=event.target.value;sessionStorage.setItem("mecord_workspace",state.workspaceId);await render();});
-$("#nav").addEventListener("click",async(event)=>{const button=event.target.closest(".nav-item");if(!button)return;state.view=button.dataset.view;await render();});
+$("#workspace-select").addEventListener("change",async(event)=>{
+  state.workspaceId=event.target.value;
+  sessionStorage.setItem("mecord_workspace",state.workspaceId);
+  if (state.view === "findingDetail") {
+    navigateConsole("/console/findings");
+    return;
+  }
+  await render();
+});
+$("#nav").addEventListener("click",(event)=>{
+  const button=event.target.closest(".nav-item");
+  if(!button)return;
+  navigateConsole(button.dataset.route || pathForView[button.dataset.view] || "/console/home");
+});
 $("#refresh-button").addEventListener("click",render);
 $("#primary-action").addEventListener("click",primaryAction);
 $("#logout-button").addEventListener("click",()=>signOut());
-document.addEventListener("keydown",(event)=>{if(event.target.matches("input,textarea,select"))return;const n=Number(event.key);if(n>=1&&n<=9){const button=document.querySelectorAll(".nav-item")[n-1];if(button)button.click();}});
+const commands = [
+  { label: "Home", meta: "Workspace pulse and action queue", route: "/console/home" },
+  { label: "Targets", meta: "Authorized assets", route: "/console/targets" },
+  { label: "Findings", meta: "Verified engineering evidence", route: "/console/findings" },
+  { label: "Approval inbox", meta: "Human-gated decisions", route: "/console/approvals" },
+  { label: "Runs", meta: "Runtime and failure recovery", route: "/console/runs" },
+  { label: "Opportunities", meta: "Repair to revenue", route: "/console/revenue" },
+  { label: "Integrations", meta: "Provider connections", route: "/console/integrations" },
+  { label: "Team & Access", meta: "Members and API keys", route: "/console/workspace/access" },
+  { label: "Audit", meta: "Workspace governance", route: "/console/workspace/audit" },
+  { label: "Add target", meta: "Register authorized scope", action: openTargetForm },
+];
+
+function renderCommands(query = "") {
+  const needle = query.trim().toLowerCase();
+  const available = commands.filter((item) =>
+    !needle || (item.label + " " + item.meta).toLowerCase().includes(needle),
+  );
+  $("#command-results").innerHTML = available.length
+    ? available.map((item, index) => `<button class="command-item" type="button" data-command="${index}">
+        <div><strong>${escapeHtml(item.label)}</strong><span>${escapeHtml(item.meta)}</span></div>
+        <span>↵</span>
+      </button>`).join("")
+    : '<div class="empty"><strong>No command found</strong>Try a page name or action.</div>';
+  $("#command-results").querySelectorAll("[data-command]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const item = available[Number(button.dataset.command)];
+      $("#command-palette").close();
+      if (item.route) navigateConsole(item.route);
+      else item.action?.();
+    });
+  });
+}
+
+function openCommandPalette() {
+  renderCommands("");
+  $("#command-query").value = "";
+  $("#command-palette").showModal();
+  queueMicrotask(() => $("#command-query").focus());
+}
+
+$("#command-button").addEventListener("click", openCommandPalette);
+$("#command-query").addEventListener("input", (event) => renderCommands(event.target.value));
+$("#command-palette").addEventListener("click", (event) => {
+  if (event.target === $("#command-palette")) $("#command-palette").close();
+});
+
+window.addEventListener("console:navigate", async (event) => {
+  applyRoute(event.detail);
+  if (state.token && state.me) await render();
+});
+window.addEventListener("popstate", async () => {
+  applyRoute(parseConsoleRoute());
+  if (state.token && state.me) await render();
+});
+
+document.addEventListener("keydown",(event)=>{
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+    event.preventDefault();
+    if (state.token && state.me) openCommandPalette();
+    return;
+  }
+  if (event.key === "Escape" && $("#command-palette").open) {
+    $("#command-palette").close();
+    return;
+  }
+  if(event.target.matches("input,textarea,select"))return;
+  const n=Number(event.key);
+  if(n>=1&&n<=9){
+    const button=[...document.querySelectorAll(".nav-item")].find((item)=>item.querySelector("kbd")?.textContent===String(n));
+    if(button)button.click();
+  }
+});
 boot();

@@ -9,6 +9,7 @@
   },
   "scripts": {
     "start": "node src/server.js",
+    "migrate": "node scripts/migrate.mjs",
     "test": "node --test",
     "validate:json": "node scripts/validate-json.mjs",
     "check": "node --check src/authorization.js && node --check src/repository.js && node --check src/server.js && npm run validate:json && npm test"

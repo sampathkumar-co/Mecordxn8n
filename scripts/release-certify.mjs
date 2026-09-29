@@ -2,6 +2,7 @@ import fs from "node:fs";
 
 const requiredFiles = [
   "db/migrations/009_release_integrations.sql",
+  "db/migrations/010_milestone_h_launch.sql",
   "src/platform/routes.js",
   "src/integrations/routes.js",
   "src/integrations/repository.js",
@@ -15,6 +16,15 @@ const requiredFiles = [
   ".github/workflows/security.yml",
   ".github/workflows/release.yml",
   "n8n/workflows/integration-delivery-dispatch.json",
+  "n8n/workflows/onboarding-finalization.json",
+  "src/milestone-h/routes.js",
+  "src/milestone-h/repository.js",
+  "src/milestone-h/billing.js",
+  "src/milestone-h/domain.js",
+  "docker-compose.production.yml",
+  "deploy/Caddyfile",
+  "scripts/production-preflight.mjs",
+  "scripts/production-smoke.mjs",
 ];
 
 const missingFiles = requiredFiles.filter((file) => !fs.existsSync(file));

@@ -9,6 +9,7 @@ const routes = [
   [/^\/console\/findings\/?$/, () => ({ view: "findings", params: {}, path: "/console/findings" })],
   [new RegExp("^/console/findings/(" + UUID + ")/?$", "i"), (match) => ({ view: "findingDetail", params: { findingId: match[1] }, path: "/console/findings/" + match[1] })],
   [/^\/console\/approvals\/?$/, () => ({ view: "approvals", params: {}, path: "/console/approvals" })],
+  [new RegExp("^/console/approvals/(" + UUID + ")/?$", "i"), (match) => ({ view: "approvalDetail", params: { approvalId: match[1] }, path: "/console/approvals/" + match[1] })],
   [/^\/console\/revenue\/?$/, () => ({ view: "pipeline", params: {}, path: "/console/revenue" })],
   [/^\/console\/runs\/?$/, () => ({ view: "operations", params: {}, path: "/console/runs" })],
   [/^\/console\/integrations\/?$/, () => ({ view: "integrations", params: {}, path: "/console/integrations" })],

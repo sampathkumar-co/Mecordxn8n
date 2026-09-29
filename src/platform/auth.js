@@ -6,6 +6,7 @@ import {
 } from "node:crypto";
 
 import { pool } from "../repository.js";
+import { limitsForPlan } from "./plans.js";
 
 const SESSION_TTL_HOURS = 12;
 const INVITE_TTL_HOURS = 72;
@@ -296,33 +297,78 @@ export async function createWorkspaceInvite({
     error.code = "INVALID_ROLE";
     throw error;
   }
-  const token = randomToken("mci_");
-  const tokenHash = sha256(token);
-  const result = await pool.query(
-    `INSERT INTO workspace_invites (
-       workspace_id, email, role, token_hash, created_by, expires_at
-     )
-     VALUES ($1,$2,$3,$4,$5,now() + ($6 * interval '1 hour'))
-     ON CONFLICT (workspace_id, lower(email))
-       WHERE accepted_at IS NULL
-     DO UPDATE SET
-       role = EXCLUDED.role,
-       token_hash = EXCLUDED.token_hash,
-       created_by = EXCLUDED.created_by,
-       expires_at = EXCLUDED.expires_at
-     RETURNING id, workspace_id, email, role, expires_at`,
-    [workspaceId, normalizedEmail, role, tokenHash, createdBy, INVITE_TTL_HOURS],
-  );
-  return {
-    invite: {
-      id: result.rows[0].id,
-      workspaceId: result.rows[0].workspace_id,
-      email: result.rows[0].email,
-      role: result.rows[0].role,
-      expiresAt: result.rows[0].expires_at,
-    },
-    inviteToken: token,
-  };
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const workspace = await client.query(
+      `SELECT w.id, COALESCE(s.plan, w.plan) AS plan
+         FROM workspaces w
+         LEFT JOIN workspace_subscriptions s ON s.workspace_id = w.id
+        WHERE w.id = $1
+          AND w.status = 'ACTIVE'
+        FOR UPDATE OF w`,
+      [workspaceId],
+    );
+    if (workspace.rowCount === 0) {
+      const error = new Error("workspace not found");
+      error.statusCode = 404;
+      error.code = "WORKSPACE_NOT_FOUND";
+      throw error;
+    }
+    const memberLimit = limitsForPlan(workspace.rows[0].plan).members;
+    if (memberLimit != null) {
+      const occupancy = await client.query(
+        `SELECT
+           (SELECT COUNT(*) FROM workspace_memberships WHERE workspace_id = $1) +
+           (SELECT COUNT(*) FROM workspace_invites
+             WHERE workspace_id = $1
+               AND accepted_at IS NULL
+               AND expires_at > now()) AS count`,
+        [workspaceId],
+      );
+      if (Number(occupancy.rows[0].count) >= memberLimit) {
+        const error = new Error("workspace member quota reached");
+        error.statusCode = 409;
+        error.code = "PLAN_MEMBER_LIMIT";
+        throw error;
+      }
+    }
+
+    const token = randomToken("mci_");
+    const tokenHash = sha256(token);
+    const result = await client.query(
+      `INSERT INTO workspace_invites (
+         workspace_id, email, role, token_hash, created_by, expires_at
+       )
+       VALUES ($1,$2,$3,$4,$5,now() + ($6 * interval '1 hour'))
+       ON CONFLICT (workspace_id, (lower(email)))
+         WHERE accepted_at IS NULL
+       DO UPDATE SET
+         role = EXCLUDED.role,
+         token_hash = EXCLUDED.token_hash,
+         created_by = EXCLUDED.created_by,
+         expires_at = EXCLUDED.expires_at
+       RETURNING id, workspace_id, email, role, expires_at`,
+      [workspaceId, normalizedEmail, role, tokenHash, createdBy, INVITE_TTL_HOURS],
+    );
+    await client.query("COMMIT");
+    return {
+      invite: {
+        id: result.rows[0].id,
+        workspaceId: result.rows[0].workspace_id,
+        email: result.rows[0].email,
+        role: result.rows[0].role,
+        expiresAt: result.rows[0].expires_at,
+      },
+      inviteToken: token,
+    };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function acceptWorkspaceInvite({

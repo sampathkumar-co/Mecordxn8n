@@ -1,5 +1,19 @@
 import { pool } from "../repository.js";
-import { compareSnapshots, snapshotFingerprint } from "./regression.js";
+import {
+  compareSnapshots,
+  monitoringFailureFingerprint,
+  snapshotFingerprint,
+} from "./regression.js";
+
+function monitorCostForCapability(capability) {
+  return capability === "BROWSER_QA" ? 1 : 0.25;
+}
+
+function boundedFailureCode(error) {
+  return String(error?.code || "MONITOR_FAILED")
+    .replace(/[^A-Z0-9_.-]/gi, "_")
+    .slice(0, 80);
+}
 
 function mapApproval(row) {
   return {
@@ -203,12 +217,14 @@ export async function createMonitoringPolicy({
   return mapPolicy(result.rows[0]);
 }
 
-export async function listMonitoringPolicies(targetId) {
+export async function listMonitoringPolicies(targetId, limit = 100) {
+  const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
   const result = await pool.query(
     `SELECT * FROM monitoring_policies
       WHERE target_id = $1
-      ORDER BY created_at DESC`,
-    [targetId],
+      ORDER BY created_at DESC
+      LIMIT $2`,
+    [targetId, safeLimit],
   );
   return result.rows.map(mapPolicy);
 }
@@ -232,12 +248,18 @@ export async function claimDueMonitoringPolicies(limit = 25) {
     await client.query("BEGIN");
     const result = await client.query(
       `WITH due AS (
-         SELECT id
-           FROM monitoring_policies
-          WHERE enabled = true
-            AND next_run_at <= now()
-          ORDER BY next_run_at
-          FOR UPDATE SKIP LOCKED
+         SELECT p0.id
+           FROM monitoring_policies p0
+          WHERE p0.enabled = true
+            AND p0.next_run_at <= now()
+            AND NOT EXISTS (
+              SELECT 1
+                FROM jobs j
+               WHERE j.state IN ('QUEUED','RUNNING')
+                 AND j.input->>'monitoringPolicyId' = p0.id::text
+            )
+          ORDER BY p0.next_run_at
+          FOR UPDATE OF p0 SKIP LOCKED
           LIMIT $1
        ),
        claimed AS (
@@ -253,7 +275,8 @@ export async function claimDueMonitoringPolicies(limit = 25) {
                 SELECT SUM(r.cost_units)
                   FROM monitoring_runs r
                  WHERE r.policy_id = c.id
-                   AND r.created_at >= date_trunc('day', now())
+                   AND r.created_at >=
+                     date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
               ), 0) AS used_today
          FROM claimed c
         ORDER BY c.next_run_at`,
@@ -313,6 +336,9 @@ export async function recordMonitoringRunFromLease({
       await client.query("ROLLBACK");
       return null;
     }
+    const monitorCost = monitorCostForCapability(
+      policyResult.rows[0].capability,
+    );
 
     const existingRun = await client.query(
       `SELECT id, policy_id, state, fingerprint
@@ -336,7 +362,7 @@ export async function recordMonitoringRunFromLease({
       `SELECT snapshot
          FROM monitoring_runs
         WHERE policy_id = $1
-          AND state IN ('BASELINE','HEALTHY','REGRESSION')
+          AND state IN ('BASELINE','HEALTHY')
         ORDER BY created_at DESC
         LIMIT 1`,
       [policyId],
@@ -362,19 +388,26 @@ export async function recordMonitoringRunFromLease({
         runState,
         JSON.stringify(snapshot),
         fingerprint,
-        Math.max(0, Number(costUnits) || 0),
+        monitorCost,
       ],
     );
     const run = runResult.rows[0];
 
-    if (regressions.length === 0 && previous) {
+    if (previous) {
+      const activeFingerprints = regressions.map(
+        (regression) => regression.fingerprint,
+      );
       await client.query(
         `UPDATE regressions
             SET status = 'RESOLVED', resolved_at = now()
-          WHERE policy_id = $1 AND status = 'OPEN'`,
-        [policyId],
+          WHERE policy_id = $1
+            AND status = 'OPEN'
+            AND NOT (fingerprint = ANY($2::text[]))`,
+        [policyId, activeFingerprints],
       );
-    } else {
+    }
+
+    if (regressions.length > 0) {
       for (const regression of regressions) {
         await client.query(
           `INSERT INTO regressions (
@@ -414,16 +447,16 @@ export async function recordMonitoringRunFromLease({
 
     await client.query(
       `UPDATE jobs SET cost_units = cost_units + $2 WHERE id = $1`,
-      [jobId, Math.max(0, Number(costUnits) || 0)],
+      [jobId, monitorCost],
     );
     await client.query(
       `INSERT INTO daily_usage (target_id, usage_date, cost_units, job_count)
-       VALUES ($1, CURRENT_DATE, $2, 1)
+       VALUES ($1, (now() AT TIME ZONE 'UTC')::date, $2, 1)
        ON CONFLICT (target_id, usage_date)
        DO UPDATE SET
          cost_units = daily_usage.cost_units + EXCLUDED.cost_units,
          job_count = daily_usage.job_count + 1`,
-      [job.target_id, Math.max(0, Number(costUnits) || 0)],
+      [job.target_id, monitorCost],
     );
 
     await client.query(
@@ -462,41 +495,220 @@ export async function recordMonitoringFailure({
   workerId,
   error,
 }) {
-  const lease = await getActiveLease(jobId, workerId);
-  if (!lease || lease.input?.monitoringPolicyId !== policyId) return null;
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const jobResult = await client.query(
+      `SELECT id, target_id, input
+         FROM jobs
+        WHERE id = $1
+          AND state = 'RUNNING'
+          AND lease_owner = $2
+          AND lease_expires_at > now()
+        FOR UPDATE`,
+      [jobId, workerId],
+    );
+    if (jobResult.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return null;
+    }
 
-  const policy = await pool.query(
-    `SELECT id FROM monitoring_policies
-      WHERE id = $1 AND target_id = $2`,
-    [policyId, lease.target_id],
-  );
-  if (policy.rowCount === 0) return null;
+    const job = jobResult.rows[0];
+    if (job.input?.monitoringPolicyId !== policyId) {
+      await client.query("ROLLBACK");
+      return null;
+    }
 
-  await pool.query(
-    `UPDATE monitoring_policies
-        SET consecutive_failures = consecutive_failures + 1,
-            last_run_at = now(),
-            updated_at = now()
-      WHERE id = $1`,
-    [policyId],
-  );
-  await pool.query(
-    `INSERT INTO operational_events (
-       component, event_type, severity, job_id, target_id, payload
-     ) VALUES ('monitoring','MONITOR_RUN_FAILED','ERROR',$1,$2,$3::jsonb)`,
-    [jobId, lease.target_id, JSON.stringify(error || {})],
-  );
-  return { recorded: true, targetId: lease.target_id };
+    const policyResult = await client.query(
+      `SELECT id, capability
+         FROM monitoring_policies
+        WHERE id = $1 AND target_id = $2
+        FOR UPDATE`,
+      [policyId, job.target_id],
+    );
+    if (policyResult.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+
+    const existing = await client.query(
+      `SELECT id, state, fingerprint
+         FROM monitoring_runs
+        WHERE job_id = $1`,
+      [jobId],
+    );
+    if (existing.rowCount > 0) {
+      await client.query("COMMIT");
+      return {
+        recorded: true,
+        duplicate: true,
+        runId: existing.rows[0].id,
+        state: existing.rows[0].state,
+      };
+    }
+
+    const code = boundedFailureCode(error);
+    const monitorCost = monitorCostForCapability(
+      policyResult.rows[0].capability,
+    );
+    const snapshot = { kind: "failure", code };
+    const runResult = await client.query(
+      `INSERT INTO monitoring_runs (
+         policy_id, job_id, state, snapshot, fingerprint, cost_units
+       )
+       VALUES ($1,$2,'FAILED',$3::jsonb,$4,$5)
+       RETURNING id, state`,
+      [
+        policyId,
+        jobId,
+        JSON.stringify(snapshot),
+        monitoringFailureFingerprint({ code }),
+        monitorCost,
+      ],
+    );
+
+    await client.query(
+      `UPDATE monitoring_policies
+          SET consecutive_failures = consecutive_failures + 1,
+              last_run_at = now(),
+              updated_at = now()
+        WHERE id = $1`,
+      [policyId],
+    );
+    await client.query(
+      `UPDATE jobs SET cost_units = cost_units + $2 WHERE id = $1`,
+      [jobId, monitorCost],
+    );
+    await client.query(
+      `INSERT INTO daily_usage (target_id, usage_date, cost_units, job_count)
+       VALUES ($1, (now() AT TIME ZONE 'UTC')::date, $2, 1)
+       ON CONFLICT (target_id, usage_date)
+       DO UPDATE SET
+         cost_units = daily_usage.cost_units + EXCLUDED.cost_units,
+         job_count = daily_usage.job_count + 1`,
+      [job.target_id, monitorCost],
+    );
+    await client.query(
+      `INSERT INTO operational_events (
+         component, event_type, severity, job_id, target_id, payload
+       ) VALUES ('monitoring','MONITOR_RUN_FAILED','ERROR',$1,$2,$3::jsonb)`,
+      [jobId, job.target_id, JSON.stringify({ policyId, code })],
+    );
+
+    await client.query("COMMIT");
+    return {
+      recorded: true,
+      duplicate: false,
+      runId: runResult.rows[0].id,
+      state: runResult.rows[0].state,
+      targetId: job.target_id,
+    };
+  } catch (errorValue) {
+    await client.query("ROLLBACK");
+    throw errorValue;
+  } finally {
+    client.release();
+  }
 }
 
-export async function listOpenRegressions(targetId) {
+export async function reconcileDeadLetterMonitoringRuns(limit = 100) {
+  const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 200);
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const candidates = await client.query(
+      `SELECT j.id AS job_id, j.target_id, p.id AS policy_id, p.capability
+         FROM jobs j
+         JOIN monitoring_policies p
+           ON p.id::text = j.input->>'monitoringPolicyId'
+          AND p.target_id = j.target_id
+        WHERE j.state = 'DEAD_LETTER'
+          AND NOT EXISTS (
+            SELECT 1 FROM monitoring_runs r WHERE r.job_id = j.id
+          )
+        ORDER BY j.completed_at NULLS LAST, j.created_at
+        FOR UPDATE OF j SKIP LOCKED
+        LIMIT $1`,
+      [safeLimit],
+    );
+
+    let recorded = 0;
+    for (const row of candidates.rows) {
+      const monitorCost = monitorCostForCapability(row.capability);
+      const code = "WORKER_RETRY_EXHAUSTED";
+      const inserted = await client.query(
+        `INSERT INTO monitoring_runs (
+           policy_id, job_id, state, snapshot, fingerprint, cost_units
+         )
+         VALUES ($1,$2,'FAILED',$3::jsonb,$4,$5)
+         ON CONFLICT (job_id) WHERE job_id IS NOT NULL DO NOTHING
+         RETURNING id`,
+        [
+          row.policy_id,
+          row.job_id,
+          JSON.stringify({ kind: "failure", code }),
+          monitoringFailureFingerprint({ code }),
+          monitorCost,
+        ],
+      );
+      if (inserted.rowCount === 0) continue;
+
+      await client.query(
+        `UPDATE monitoring_policies
+            SET consecutive_failures = consecutive_failures + 1,
+                last_run_at = now(),
+                updated_at = now()
+          WHERE id = $1`,
+        [row.policy_id],
+      );
+      await client.query(
+        `UPDATE jobs SET cost_units = cost_units + $2 WHERE id = $1`,
+        [row.job_id, monitorCost],
+      );
+      await client.query(
+        `INSERT INTO daily_usage (target_id, usage_date, cost_units, job_count)
+         VALUES ($1, (now() AT TIME ZONE 'UTC')::date, $2, 1)
+         ON CONFLICT (target_id, usage_date)
+         DO UPDATE SET
+           cost_units = daily_usage.cost_units + EXCLUDED.cost_units,
+           job_count = daily_usage.job_count + 1`,
+        [row.target_id, monitorCost],
+      );
+      await client.query(
+        `INSERT INTO operational_events (
+           component, event_type, severity, job_id, target_id, payload
+         ) VALUES (
+           'monitoring','MONITOR_RUN_FAILED','ERROR',$1,$2,$3::jsonb
+         )`,
+        [
+          row.job_id,
+          row.target_id,
+          JSON.stringify({ policyId: row.policy_id, code }),
+        ],
+      );
+      recorded += 1;
+    }
+
+    await client.query("COMMIT");
+    return recorded;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function listOpenRegressions(targetId, limit = 100) {
+  const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
   const result = await pool.query(
     `SELECT r.*, p.name AS policy_name, p.requested_url
        FROM regressions r
        JOIN monitoring_policies p ON p.id = r.policy_id
       WHERE p.target_id = $1 AND r.status = 'OPEN'
-      ORDER BY r.created_at DESC`,
-    [targetId],
+      ORDER BY r.created_at DESC
+      LIMIT $2`,
+    [targetId, safeLimit],
   );
   return result.rows;
 }
@@ -634,10 +846,12 @@ export async function cancelInvalidAuthorizationJobs() {
     `UPDATE jobs j
         SET state = 'CANCELLED',
             completed_at = now(),
+            lease_owner = NULL,
+            lease_expires_at = NULL,
             error = '{"code":"AUTHORIZATION_NO_LONGER_VALID"}'::jsonb
        FROM authorizations a
       WHERE j.authorization_id = a.id
-        AND j.state = 'QUEUED'
+        AND j.state IN ('QUEUED','RUNNING')
         AND (
           a.revoked_at IS NOT NULL
           OR (a.expires_at IS NOT NULL AND a.expires_at <= now())
@@ -677,7 +891,7 @@ export async function getOperationalMetrics() {
       `SELECT COALESCE(SUM(cost_units),0)::numeric AS cost_units,
               COALESCE(SUM(job_count),0)::int AS job_count
          FROM daily_usage
-        WHERE usage_date = CURRENT_DATE`,
+        WHERE usage_date = (now() AT TIME ZONE 'UTC')::date`,
     ),
   ]);
 
@@ -712,7 +926,7 @@ export async function markReportApproved(reportId) {
   const result = await pool.query(
     `UPDATE reports
         SET status = 'APPROVED'
-      WHERE id = $1 AND status = 'READY'
+      WHERE id = $1 AND status IN ('READY','APPROVED')
       RETURNING id, target_id, kind, status, markdown, summary, created_at`,
     [reportId],
   );

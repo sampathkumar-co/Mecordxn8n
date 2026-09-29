@@ -28,6 +28,8 @@ export async function runRemediationOnce({
 
   let finding = null;
   let heartbeatTimer = null;
+  let heartbeatFailure = null;
+  let abortController = null;
 
   try {
     finding = await getFindingContext({
@@ -67,14 +69,32 @@ export async function runRemediationOnce({
         token: process.env.MECORD_MCP_TOKEN,
       });
 
+    abortController = new AbortController();
+    const renewLease = async () => {
+      try {
+        await heartbeatJob({
+          controlApiUrl,
+          workerToken,
+          jobId: job.id,
+          workerId,
+          leaseSeconds: 300,
+        });
+      } catch (error) {
+        if (!heartbeatFailure) {
+          heartbeatFailure = Object.assign(
+            new Error("remediation lease heartbeat failed"),
+            { code: "LEASE_HEARTBEAT_FAILED", cause: error },
+          );
+          abortController.abort(heartbeatFailure);
+        }
+      }
+    };
+
+    await renewLease();
+    if (heartbeatFailure) throw heartbeatFailure;
+
     heartbeatTimer = setInterval(() => {
-      void heartbeatJob({
-        controlApiUrl,
-        workerToken,
-        jobId: job.id,
-        workerId,
-        leaseSeconds: 300,
-      }).catch(() => {});
+      void renewLease();
     }, 60_000);
     heartbeatTimer.unref?.();
 
@@ -82,7 +102,12 @@ export async function runRemediationOnce({
       finding,
       projectRoot: job.input?.projectRoot,
       repairPatterns: patternResponse.patterns || [],
+      signal: abortController.signal,
     });
+    if (heartbeatFailure) throw heartbeatFailure;
+
+    await renewLease();
+    if (heartbeatFailure) throw heartbeatFailure;
 
     const remediationRecord = await recordRemediationResult({
       controlApiUrl,

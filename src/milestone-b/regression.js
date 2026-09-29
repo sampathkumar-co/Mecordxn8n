@@ -82,6 +82,7 @@ export function compareSnapshots(previous, current) {
       current.statusCode >= 400
     ) {
       regressions.push({
+        signal: "http-status",
         category: "availability",
         severity: severityForStatus(current.statusCode),
         summary: `HTTP status regressed from ${previous.statusCode} to ${current.statusCode}`,
@@ -95,6 +96,7 @@ export function compareSnapshots(previous, current) {
       current.latencyMs > Math.max(previous.latencyMs * 2, previous.latencyMs + 1000)
     ) {
       regressions.push({
+        signal: "http-latency",
         category: "performance",
         severity: "MEDIUM",
         summary: `HTTP latency regressed from ${previous.latencyMs}ms to ${current.latencyMs}ms`,
@@ -109,6 +111,7 @@ export function compareSnapshots(previous, current) {
       current.mainStatus >= 400
     ) {
       regressions.push({
+        signal: "page-status",
         category: "availability",
         severity: severityForStatus(current.mainStatus),
         summary: `Page status regressed from ${previous.mainStatus} to ${current.mainStatus}`,
@@ -118,12 +121,14 @@ export function compareSnapshots(previous, current) {
 
     for (const key of [
       "pageErrorCount",
+      "consoleErrorCount",
       "httpErrorCount",
       "requestFailureCount",
       "brokenImageCount",
     ]) {
       if ((current[key] || 0) > (previous[key] || 0)) {
         regressions.push({
+          signal: key,
           category: "reliability",
           severity: key === "pageErrorCount" ? "HIGH" : "MEDIUM",
           summary: `${key} increased from ${previous[key] || 0} to ${current[key] || 0}`,
@@ -138,6 +143,7 @@ export function compareSnapshots(previous, current) {
       current.durationMs > Math.max(previous.durationMs * 2, previous.durationMs + 1500)
     ) {
       regressions.push({
+        signal: "browser-duration",
         category: "performance",
         severity: "MEDIUM",
         summary: `Browser load duration regressed from ${previous.durationMs}ms to ${current.durationMs}ms`,
@@ -147,6 +153,7 @@ export function compareSnapshots(previous, current) {
 
     if ((current.horizontalOverflowPx || 0) > 8 && (previous.horizontalOverflowPx || 0) <= 8) {
       regressions.push({
+        signal: "horizontal-overflow",
         category: "layout",
         severity: "LOW",
         summary: "New horizontal overflow detected",
@@ -160,6 +167,13 @@ export function compareSnapshots(previous, current) {
 
   return regressions.map((item) => ({
     ...item,
-    fingerprint: hash([item.category, item.summary]),
+    fingerprint: hash([item.category, item.signal || item.summary]),
   }));
+}
+
+export function monitoringFailureFingerprint(error) {
+  const code = String(error?.code || "MONITOR_FAILED")
+    .replace(/[^A-Z0-9_.-]/gi, "_")
+    .slice(0, 80);
+  return hash(["monitoring-failure", code]);
 }

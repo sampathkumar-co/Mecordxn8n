@@ -188,3 +188,15 @@ Cross-client repair memory stores non-reversible symptom signatures and structur
 ### Operational visibility
 
 `operational_events` stores bounded system events such as dead letters, monitor failures, regression detection, budget skips, and queue failures. `daily_usage` records per-target cost units for budget/operations reporting.
+
+### Milestone B failure and concurrency model
+
+The Control API is the policy enforcement point. n8n may trigger `/v1/monitoring/tick`, but cannot bypass authorization, approvals, budgets, leases, or scope checks.
+
+A monitoring policy has at most one queued/running job. Policy claims use `FOR UPDATE SKIP LOCKED`; successful and failed monitoring executions are deduplicated by job ID and charged from server-known capability cost. Terminal worker crashes are reconciled after dead-lettering so failure loops cannot evade policy budgets.
+
+Regression state is compared with the most recent non-regressed baseline/healthy snapshot. Signal fingerprints are stable across changing counts/latencies, allowing persistent regressions to update one open record while independently recovered signals are resolved.
+
+Repair intelligence crosses clients only after Control API sanitization. Symptom material and root-cause keys are hashed; result structure is reduced to bounded type/count metadata. Worker-supplied raw fields are discarded.
+
+For remediation, human approval is necessary but not sufficient: the finding must still be verified and current CLIENT_AUTHORIZED scope must still permit SOURCE_REMEDIATION. Lease heartbeat loss aborts the MCP client request; authorization invalidation cancels queued and running jobs and clears their leases.

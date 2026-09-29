@@ -263,9 +263,13 @@ export function createServer({
     try {
       const url = new URL(req.url, "http://localhost");
 
+      if (req.method === "GET" && url.pathname === "/livez") {
+        return json(res, 200, { ok: true });
+      }
+
       if (req.method === "GET" && url.pathname === "/healthz") {
         await pingDatabase();
-        return json(res, 200, { ok: true });
+        return json(res, 200, { ok: true, database: "ready" });
       }
 
       const workerRoute = url.pathname.startsWith("/v1/worker/");

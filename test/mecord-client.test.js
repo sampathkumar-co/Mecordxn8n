@@ -55,3 +55,33 @@ test("MCP client initializes a session then calls the remediation tool", async (
   assert.equal(calls[2].options.headers["mcp-session-id"], "session-1");
   assert.equal(result.content[0].text, "accepted");
 });
+
+test("MCP client propagates the remediation abort signal", async () => {
+  const controller = new AbortController();
+  const signals = [];
+  const replies = [
+    response({
+      sessionId: "session-abort",
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, result: {} }),
+    }),
+    response(),
+    response({
+      body: JSON.stringify({ jsonrpc: "2.0", id: 2, result: { ok: true } }),
+    }),
+  ];
+  const client = new MecordMcpClient({
+    endpoint: "https://mcp.example.test/mcp",
+    fetchImpl: async (_url, options) => {
+      signals.push(options.signal);
+      return replies.shift();
+    },
+  });
+
+  await client.callTool(
+    "operations",
+    { action: "submit" },
+    { signal: controller.signal },
+  );
+  assert.equal(signals.length, 3);
+  assert.ok(signals.every((signal) => signal === controller.signal));
+});

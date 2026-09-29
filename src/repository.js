@@ -1,4 +1,5 @@
 import pg from "pg";
+import { limitsForPlan } from "./platform/plans.js";
 
 const { Pool } = pg;
 
@@ -12,6 +13,7 @@ export async function pingDatabase() {
 }
 
 export async function createTargetWithAuthorization({
+  workspaceId = "00000000-0000-4000-8000-000000000001",
   organizationName,
   baseUrl,
   authorization,
@@ -21,11 +23,40 @@ export async function createTargetWithAuthorization({
   try {
     await client.query("BEGIN");
 
+    const workspaceResult = await client.query(
+      `SELECT w.id, COALESCE(s.plan, w.plan) AS plan
+         FROM workspaces w
+         LEFT JOIN workspace_subscriptions s ON s.workspace_id = w.id
+        WHERE w.id = $1
+          AND w.status = 'ACTIVE'
+        FOR UPDATE OF w`,
+      [workspaceId],
+    );
+    if (workspaceResult.rowCount === 0) {
+      const error = new Error("workspace not found or inactive");
+      error.statusCode = 404;
+      error.code = "WORKSPACE_NOT_FOUND";
+      throw error;
+    }
+    const targetLimit = limitsForPlan(workspaceResult.rows[0].plan).targets;
+    if (targetLimit != null) {
+      const targetCount = await client.query(
+        "SELECT COUNT(*)::int AS count FROM targets WHERE workspace_id = $1",
+        [workspaceId],
+      );
+      if (targetCount.rows[0].count >= targetLimit) {
+        const error = new Error("workspace target quota reached");
+        error.statusCode = 409;
+        error.code = "PLAN_TARGET_LIMIT";
+        throw error;
+      }
+    }
+
     const targetResult = await client.query(
-      `INSERT INTO targets (organization_name, base_url)
-       VALUES ($1, $2)
-       RETURNING id, organization_name, base_url, created_at`,
-      [organizationName, baseUrl],
+      `INSERT INTO targets (workspace_id, organization_name, base_url)
+       VALUES ($1, $2, $3)
+       RETURNING id, workspace_id, organization_name, base_url, created_at`,
+      [workspaceId, organizationName, baseUrl],
     );
 
     const target = targetResult.rows[0];
@@ -70,10 +101,26 @@ export async function createTargetWithAuthorization({
       ],
     );
 
+    await client.query(
+      `INSERT INTO workspace_usage_monthly (
+         workspace_id, usage_month, targets_created
+       )
+       VALUES (
+         $1,
+         date_trunc('month', now() AT TIME ZONE 'UTC')::date,
+         1
+       )
+       ON CONFLICT (workspace_id, usage_month)
+       DO UPDATE SET
+         targets_created = workspace_usage_monthly.targets_created + 1`,
+      [workspaceId],
+    );
+
     await client.query("COMMIT");
 
     return {
       id: target.id,
+      workspaceId: target.workspace_id,
       organizationName: target.organization_name,
       baseUrl: target.base_url,
       createdAt: target.created_at,
@@ -116,6 +163,52 @@ export async function createAuthorizedJob({
   try {
     await client.query("BEGIN");
 
+    const workspaceResult = await client.query(
+      `SELECT t.workspace_id, COALESCE(s.plan, w.plan) AS plan
+         FROM targets t
+         JOIN workspaces w ON w.id = t.workspace_id
+         LEFT JOIN workspace_subscriptions s ON s.workspace_id = w.id
+        WHERE t.id = $1
+          AND w.status = 'ACTIVE'
+        FOR UPDATE OF w`,
+      [targetId],
+    );
+    if (workspaceResult.rowCount === 0) {
+      const error = new Error("target workspace not found or inactive");
+      error.statusCode = 404;
+      error.code = "WORKSPACE_NOT_FOUND";
+      throw error;
+    }
+    const workspaceId = workspaceResult.rows[0].workspace_id;
+    const jobLimit = limitsForPlan(workspaceResult.rows[0].plan).jobsPerMonth;
+    await client.query(
+      `INSERT INTO workspace_usage_monthly (workspace_id, usage_month)
+       VALUES (
+         $1,
+         date_trunc('month', now() AT TIME ZONE 'UTC')::date
+       )
+       ON CONFLICT (workspace_id, usage_month) DO NOTHING`,
+      [workspaceId],
+    );
+    const usageResult = await client.query(
+      `SELECT jobs_created
+         FROM workspace_usage_monthly
+        WHERE workspace_id = $1
+          AND usage_month =
+            date_trunc('month', now() AT TIME ZONE 'UTC')::date
+        FOR UPDATE`,
+      [workspaceId],
+    );
+    if (
+      jobLimit != null &&
+      Number(usageResult.rows[0].jobs_created) >= jobLimit
+    ) {
+      const error = new Error("workspace monthly job quota reached");
+      error.statusCode = 409;
+      error.code = "PLAN_JOB_LIMIT";
+      throw error;
+    }
+
     const result = await client.query(
       `INSERT INTO jobs (
          target_id,
@@ -157,6 +250,15 @@ export async function createAuthorizedJob({
           capability: decision.capability,
         }),
       ],
+    );
+
+    await client.query(
+      `UPDATE workspace_usage_monthly
+          SET jobs_created = jobs_created + 1
+        WHERE workspace_id = $1
+          AND usage_month =
+            date_trunc('month', now() AT TIME ZONE 'UTC')::date`,
+      [workspaceId],
     );
 
     await client.query("COMMIT");

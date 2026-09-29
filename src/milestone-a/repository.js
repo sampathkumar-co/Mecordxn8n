@@ -1,4 +1,5 @@
 import { pool } from "../repository.js";
+import { enqueueTargetIntegrationEvent } from "../integrations/repository.js";
 
 function mapFinding(row) {
   return {
@@ -342,6 +343,20 @@ export async function recordVerificationFromLease({
       ],
     );
 
+    if (status === "VERIFIED") {
+      await enqueueTargetIntegrationEvent({
+        client,
+        targetId: job.target_id,
+        eventType: "finding.verified",
+        payload: {
+          findingId,
+          verificationId: verificationRow.id,
+          confidence: Number(confidence),
+        },
+        idempotencyKey: `finding.verified:${verificationRow.id}`,
+      });
+    }
+
     await client.query("COMMIT");
     return verificationRow;
   } catch (error) {
@@ -407,6 +422,19 @@ export async function recordRemediationResultFromLease({
         JSON.stringify({ status, remediationRequestId: result.rows[0]?.id || null }),
       ],
     );
+    if (status === "SUCCEEDED" && result.rows[0]) {
+      await enqueueTargetIntegrationEvent({
+        client,
+        targetId: job.target_id,
+        eventType: "remediation.succeeded",
+        payload: {
+          remediationRequestId: result.rows[0].id,
+          findingId: result.rows[0].finding_id,
+          jobId,
+        },
+        idempotencyKey: `remediation.succeeded:${result.rows[0].id}`,
+      });
+    }
     await client.query("COMMIT");
     return result.rows[0] || null;
   } catch (error) {

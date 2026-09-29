@@ -214,3 +214,65 @@ Milestone B is enforced at the Control API/PostgreSQL boundary, not by trusting 
 - Remediation workers renew their lease before and during Mecord execution. Lease/authorization loss aborts the client-side MCP request.
 - `GET /livez` is process liveness. `GET /healthz` is database-backed readiness.
 - Migration `005_milestone_b_hardening.sql` adds the budget bound and indexes/uniqueness used by these guarantees.
+
+
+## V1 productization
+
+The V1 release candidate adds the product and operations layer around Milestones A-C.
+
+### Control Center
+
+The built-in web console is served at `/console` and provides a compact multi-workspace control surface for targets, findings, evidence, approvals, commercial pipeline, operations, integrations, members, API keys, subscription/usage, retention and audit data.
+
+### Multi-tenant SaaS controls
+
+V1 adds:
+
+- isolated workspaces and workspace-bound targets;
+- OWNER / ADMIN / OPERATOR / VIEWER roles;
+- invite-only membership;
+- salted scrypt password hashing, session revocation, login lockout and bounded sessions;
+- scoped API keys with rate limits and expiry/revocation;
+- plan quotas and monthly usage accounting;
+- workspace subscriptions and Stripe subscription ingestion;
+- retention controls and workspace deletion;
+- workspace security/audit events.
+
+Legacy operator-token routes remain available for trusted internal orchestration. Customer-facing product access uses the platform workspace boundary.
+
+### Integrations
+
+Integration configuration is encrypted at rest with AES-256-GCM using `PLATFORM_MASTER_KEY` and workspace/provider-bound AAD.
+
+Supported V1 providers:
+
+- GitHub — outbound issue creation and signed inbound webhook receipts;
+- Slack — outbound webhook notifications;
+- generic HTTPS webhook — public-address-only destination with HMAC event signing;
+- Stripe — signed inbound subscription lifecycle events.
+
+Product events are placed in a durable, workspace-scoped outbox with idempotency keys, leases, retry/backoff and dead-letter handling. n8n triggers the integration worker; n8n does not decrypt provider credentials or decide permissions.
+
+Events include verified findings, pending approvals, opened regressions, successful authorized remediation, received revenue and service renewals. Event payloads contain bounded product identifiers/state rather than raw source files, MCP responses or credentials.
+
+### Release certification
+
+A V1 candidate is not considered release-ready merely because unit tests pass. GitHub Actions enforces three gates:
+
+1. **CI** — migrations, syntax/JSON validation, complete Node test suite, Compose validation, browser image build.
+2. **Security** — high-severity dependency audit, repository secret scan, control-image build and HIGH/CRITICAL Trivy scan.
+3. **Release Gate** — CI checks again, synthetic performance benchmark, PostgreSQL 17 database backup, clean-database restore verification, release manifest generation, Compose validation, and production image builds.
+
+Release artifacts include `release-certification.json` and the database backup manifest (SHA-256 + byte length). The database backup itself is intentionally not uploaded by CI.
+
+### Disaster recovery
+
+`npm run backup:db` creates a PostgreSQL custom-format dump and checksum manifest.
+
+`npm run restore:verify` restores that dump into a clean database supplied through `RESTORE_DATABASE_URL` and verifies the canonical A-C + platform/integration tables exist.
+
+Production operators should store database dumps and the artifact volume in a separately secured backup destination and periodically run restore verification against an isolated database.
+
+### Production prerequisites
+
+The repository can certify the software and deployment definition, but it cannot manufacture live production credentials or customer accounts. A real deployment still requires operator-provided secrets/infrastructure such as PostgreSQL credentials, n8n encryption key, platform master/bootstrap keys, Mecord MCP credentials, DNS/TLS/reverse proxy configuration, backup storage, and any GitHub/Slack/Stripe/webhook credentials selected by a workspace.

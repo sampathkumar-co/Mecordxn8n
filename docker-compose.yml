@@ -23,6 +23,7 @@ services:
       DB_POOL_MAX: ${DB_POOL_MAX:-10}
       ORCHESTRATOR_TOKEN: ${ORCHESTRATOR_TOKEN}
       WORKER_TOKEN: ${WORKER_TOKEN}
+      BOOTSTRAP_TOKEN: ${BOOTSTRAP_TOKEN}
     depends_on:
       postgres:
         condition: service_healthy
@@ -127,6 +128,18 @@ services:
         condition: service_started
     command: node src/workers/remediation-service.js
 
+  integration-delivery:
+    build: .
+    restart: unless-stopped
+    environment:
+      <<: *worker-env
+      WORKER_ID: integration-delivery-worker
+      WORKER_PORT: 8096
+    depends_on:
+      control-api:
+        condition: service_started
+    command: node src/workers/integration-service.js
+
   n8n:
     image: docker.n8n.io/n8nio/n8n:latest
     restart: unless-stopped
@@ -152,6 +165,7 @@ services:
       MECORDXN8N_JOURNEY_QA_URL: http://journey-qa:8093
       MECORDXN8N_VERIFICATION_URL: http://finding-verification:8094
       MECORDXN8N_REMEDIATION_URL: http://remediation:8095
+      MECORDXN8N_INTEGRATION_URL: http://integration-delivery:8096
       MECORDXN8N_WORKER_TRIGGER_TOKEN: ${WORKER_TRIGGER_TOKEN}
     depends_on:
       postgres:

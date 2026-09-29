@@ -12,10 +12,10 @@
     "migrate": "node scripts/migrate.mjs",
     "test": "node --test",
     "validate:json": "node scripts/validate-json.mjs",
-    "check": "node --check src/authorization.js && node --check src/repository.js && node --check src/server.js && node --check src/workers/control-client.js && node --check src/workers/trigger-service.js && node --check src/workers/public-http.js && node --check src/workers/http-observer-service.js && node --check src/workers/browser-qa.js && node --check src/workers/browser-qa-service.js && npm run validate:json && npm test"
+    "check": "node --check src/authorization.js && node --check src/repository.js && node --check src/server.js && node --check src/workers/control-client.js && node --check src/workers/trigger-service.js && node --check src/workers/public-http.js && node --check src/workers/safe-egress-proxy.js && node --check src/workers/http-observer-service.js && node --check src/workers/browser-qa.js && node --check src/workers/browser-qa-service.js && npm run validate:json && npm test"
   },
   "dependencies": {
     "pg": "^8.13.1",
-    "playwright": "^1.55.0"
+    "playwright": "1.63.0"
   }
 }

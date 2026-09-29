@@ -581,7 +581,7 @@ export async function authenticatePlatformToken(token) {
   if (raw.startsWith(SESSION_PREFIX)) {
     const result = await pool.query(
       `SELECT s.id AS principal_id, s.user_id, s.expires_at,
-              u.email, u.display_name, u.status
+              u.email, u.display_name, u.status, u.is_platform_operator
          FROM platform_sessions s
          JOIN platform_users u ON u.id = s.user_id
         WHERE s.token_hash = $1
@@ -603,6 +603,7 @@ export async function authenticatePlatformToken(token) {
         id: result.rows[0].user_id,
         email: result.rows[0].email,
         displayName: result.rows[0].display_name,
+        isPlatformOperator: Boolean(result.rows[0].is_platform_operator),
       },
       rateLimitPerHour: 4000,
     };

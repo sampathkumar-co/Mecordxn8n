@@ -669,12 +669,17 @@ export async function runMilestoneHMaintenance(limit = 25) {
       const target = await getTarget(candidate.primary_target_id);
       if (!target) throw Object.assign(new Error("target missing"), { code: "TARGET_MISSING" });
       const findings = await listOpportunityFindings(target.id);
-      const proposal = buildClientProposal({ target, findings });
+      const proposalMarkdown = buildClientProposal({ target, findings });
       const report = await saveReport({
         targetId: target.id,
         kind: "CLIENT_PROPOSAL",
-        markdown: proposal.markdown,
-        summary: proposal.summary,
+        markdown: proposalMarkdown,
+        summary: {
+          source: "milestone-h-onboarding",
+          verifiedFindings: findings.filter(
+            (item) => item.verification?.status === "VERIFIED",
+          ).length,
+        },
       });
       await setOnboardingReport({
         workspaceId: candidate.workspace_id,

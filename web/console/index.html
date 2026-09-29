@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Mecordxn8n Control Center</title>
+  <link rel="stylesheet" href="/console/styles.css">
+</head>
+<body>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <main id="auth-view" class="auth-view">
+    <section class="auth-brand">
+      <div class="brand-mark">M</div>
+      <div>
+        <p class="eyebrow">MECORD × N8N</p>
+        <h1>Problem → Proof → Repair → Revenue.</h1>
+        <p class="auth-copy">An authorization-gated engineering control plane for verified quality, remediation, and commercial operations.</p>
+      </div>
+      <div class="trust-list">
+        <div><strong>Evidence first</strong><span>Independent verification before repair.</span></div>
+        <div><strong>Human gates</strong><span>Approvals remain explicit and auditable.</span></div>
+        <div><strong>Fail closed</strong><span>Scope, consent, leases, and budgets are revalidated.</span></div>
+      </div>
+    </section>
+
+    <section class="auth-panel">
+      <form id="login-form" class="auth-card">
+        <div>
+          <p class="eyebrow">CONTROL CENTER</p>
+          <h2>Sign in</h2>
+          <p class="muted">Use your workspace account. Credentials never enter n8n.</p>
+        </div>
+        <label>Email<input id="login-email" name="email" type="email" autocomplete="username" required></label>
+        <label>Password<input id="login-password" name="password" type="password" autocomplete="current-password" minlength="12" required></label>
+        <button class="button primary" type="submit">Sign in</button>
+        <button id="show-bootstrap" class="button text" type="button">First deployment? Bootstrap owner</button>
+      </form>
+
+      <form id="bootstrap-form" class="auth-card hidden">
+        <div>
+          <p class="eyebrow">ONE-TIME SETUP</p>
+          <h2>Bootstrap owner</h2>
+          <p class="muted">Works only before the first platform user exists.</p>
+        </div>
+        <label>Bootstrap token<input id="bootstrap-token" type="password" required></label>
+        <label>Owner name<input id="bootstrap-name" maxlength="160" required></label>
+        <label>Owner email<input id="bootstrap-email" type="email" required></label>
+        <label>Password<input id="bootstrap-password" type="password" minlength="12" maxlength="128" required></label>
+        <label>Workspace name<input id="bootstrap-workspace" maxlength="160" required></label>
+        <label>Workspace slug<input id="bootstrap-slug" maxlength="80" pattern="[A-Za-z0-9-]+"></label>
+        <button class="button primary" type="submit">Create workspace</button>
+        <button id="show-login" class="button text" type="button">Back to sign in</button>
+      </form>
+    </section>
+  </main>
+
+  <div id="app-view" class="app-shell hidden">
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <div class="brand-mark small">M</div>
+        <div><strong>Mecordxn8n</strong><span>Control Center</span></div>
+      </div>
+
+      <div class="workspace-control">
+        <span class="label">Workspace</span>
+        <select id="workspace-select" aria-label="Workspace"></select>
+      </div>
+
+      <nav id="nav" class="nav" aria-label="Primary">
+        <button data-view="overview" class="nav-item active"><span>Overview</span><kbd>1</kbd></button>
+        <button data-view="targets" class="nav-item"><span>Targets</span><kbd>2</kbd></button>
+        <button data-view="findings" class="nav-item"><span>Findings</span><kbd>3</kbd></button>
+        <button data-view="approvals" class="nav-item"><span>Approvals</span><kbd>4</kbd></button>
+        <button data-view="pipeline" class="nav-item"><span>Pipeline</span><kbd>5</kbd></button>
+        <button data-view="operations" class="nav-item"><span>Operations</span><kbd>6</kbd></button>
+        <button data-view="integrations" class="nav-item"><span>Integrations</span><kbd>7</kbd></button>
+        <button data-view="team" class="nav-item"><span>Team & Access</span><kbd>8</kbd></button>
+        <button data-view="audit" class="nav-item"><span>Audit</span><kbd>9</kbd></button>
+      </nav>
+
+      <div class="sidebar-foot">
+        <div id="user-chip" class="user-chip"></div>
+        <button id="logout-button" class="button subtle">Sign out</button>
+      </div>
+    </aside>
+
+    <section class="main">
+      <header class="topbar">
+        <div>
+          <p id="view-kicker" class="eyebrow">WORKSPACE</p>
+          <h1 id="view-title">Overview</h1>
+        </div>
+        <div class="top-actions">
+          <span id="connection-badge" class="status-pill good">Control API online</span>
+          <button id="refresh-button" class="button subtle">Refresh</button>
+          <button id="primary-action" class="button primary">Add target</button>
+        </div>
+      </header>
+      <div id="content" class="content" tabindex="-1"></div>
+    </section>
+  </div>
+
+  <dialog id="modal" class="modal">
+    <form method="dialog" class="modal-shell">
+      <header><div><p id="modal-kicker" class="eyebrow">ACTION</p><h2 id="modal-title"></h2></div><button value="cancel" class="icon-button" aria-label="Close">×</button></header>
+      <div id="modal-content" class="modal-content"></div>
+    </form>
+  </dialog>
+
+  <script type="module" src="/console/app.js"></script>
+</body>
+</html>

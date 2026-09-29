@@ -490,6 +490,8 @@ export async function handleMilestoneCRoute({
   );
   if (req.method === "GET" && match) {
     if (!validId(match[1])) throw badRequest("target id is invalid");
+    const target = await getTarget(match[1]);
+    if (!target) return json(res, 404, { error: "TARGET_NOT_FOUND" });
     return json(res, 200, await getCommercialPolicy(match[1]));
   }
   if (req.method === "POST" && match) {

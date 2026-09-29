@@ -225,38 +225,51 @@ export async function setMonitoringPolicyEnabled(policyId, enabled) {
   return result.rows[0] ? mapPolicy(result.rows[0]) : null;
 }
 
-export async function listDueMonitoringPolicies(limit = 25) {
-  const result = await pool.query(
-    `SELECT p.*,
-            COALESCE((
-              SELECT SUM(r.cost_units)
-                FROM monitoring_runs r
-               WHERE r.policy_id = p.id
-                 AND r.created_at >= date_trunc('day', now())
-            ), 0) AS used_today
-       FROM monitoring_policies p
-      WHERE p.enabled = true
-        AND p.next_run_at <= now()
-      ORDER BY p.next_run_at
-      LIMIT $1`,
-    [Math.min(Math.max(Number(limit) || 25, 1), 100)],
-  );
-  return result.rows.map((row) => ({
-    ...mapPolicy(row),
-    usedToday: Number(row.used_today || 0),
-  }));
-}
-
-export async function markMonitoringPolicyQueued(policyId) {
-  const result = await pool.query(
-    `UPDATE monitoring_policies
-        SET next_run_at = now() + (cadence_minutes * interval '1 minute'),
-            updated_at = now()
-      WHERE id = $1
-      RETURNING *`,
-    [policyId],
-  );
-  return result.rows[0] ? mapPolicy(result.rows[0]) : null;
+export async function claimDueMonitoringPolicies(limit = 25) {
+  const safeLimit = Math.min(Math.max(Number(limit) || 25, 1), 100);
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await client.query(
+      `WITH due AS (
+         SELECT id
+           FROM monitoring_policies
+          WHERE enabled = true
+            AND next_run_at <= now()
+          ORDER BY next_run_at
+          FOR UPDATE SKIP LOCKED
+          LIMIT $1
+       ),
+       claimed AS (
+         UPDATE monitoring_policies p
+            SET next_run_at = now() + (p.cadence_minutes * interval '1 minute'),
+                updated_at = now()
+           FROM due
+          WHERE p.id = due.id
+         RETURNING p.*
+       )
+       SELECT c.*,
+              COALESCE((
+                SELECT SUM(r.cost_units)
+                  FROM monitoring_runs r
+                 WHERE r.policy_id = c.id
+                   AND r.created_at >= date_trunc('day', now())
+              ), 0) AS used_today
+         FROM claimed c
+        ORDER BY c.next_run_at`,
+      [safeLimit],
+    );
+    await client.query("COMMIT");
+    return result.rows.map((row) => ({
+      ...mapPolicy(row),
+      usedToday: Number(row.used_today || 0),
+    }));
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function recordMonitoringRunFromLease({
@@ -592,6 +605,24 @@ export async function recordOperationalEvent({
       JSON.stringify(payload),
     ],
   );
+}
+
+export async function cancelInvalidAuthorizationJobs() {
+  const result = await pool.query(
+    `UPDATE jobs j
+        SET state = 'CANCELLED',
+            completed_at = now(),
+            error = '{"code":"AUTHORIZATION_NO_LONGER_VALID"}'::jsonb
+       FROM authorizations a
+      WHERE j.authorization_id = a.id
+        AND j.state = 'QUEUED'
+        AND (
+          a.revoked_at IS NOT NULL
+          OR (a.expires_at IS NOT NULL AND a.expires_at <= now())
+        )
+      RETURNING j.id, j.target_id`,
+  );
+  return result.rows.length;
 }
 
 export async function getOperationalMetrics() {

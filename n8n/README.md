@@ -56,3 +56,16 @@ The browser worker is deliberately passive:
 - no private/reserved IP destinations.
 
 It records initial page/runtime/console/network failures and stores them as deduplicated findings through the control API.
+
+
+## Production maintenance
+
+Import `workflows/production-maintenance.json`.
+
+Every five minutes it calls the authenticated control API maintenance tick. The control API—not n8n—atomically claims due policies, re-checks authorization, applies daily budgets, cancels invalid queued work, and sweeps exhausted jobs.
+
+n8n never decides whether a target is allowed to run and never approves remediation.
+
+## Human approval
+
+There is intentionally no workflow that auto-approves source remediation or report release. Approval remains an explicit control-API/user action so retries, schedules, or an AI workflow cannot silently grant authority.

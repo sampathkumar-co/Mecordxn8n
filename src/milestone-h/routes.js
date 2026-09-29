@@ -31,6 +31,7 @@ import { verifyDnsTxtOwnership } from "./domain.js";
 import {
   completeBillingCheckout,
   completeDomainVerification,
+  consumePublicRateLimit,
   createDomainVerification,
   createReportShareLink,
   getDomainVerification,
@@ -44,6 +45,7 @@ import {
   markOnboardingStep,
   recordBillingCheckout,
   reconcileBillingInvoice,
+  purgePublicRateLimits,
   reportBelongsToWorkspace,
   replaceTargetAuthorization,
   revokeReportShareLink,
@@ -157,7 +159,15 @@ export async function handleMilestoneHPublicRoute({
   badRequest,
 }) {
   if (req.method === "POST" && url.pathname === "/v1/platform/auth/signup") {
+    const remoteAddress = String(req.socket?.remoteAddress || "unknown");
+    if (!(await consumePublicRateLimit({ key: "signup-ip:" + remoteAddress, limit: 10 }))) {
+      return json(res, 429, { error: "SIGNUP_RATE_LIMITED" });
+    }
     const body = await readJson(req);
+    const emailKey = String(body.email || "").trim().toLowerCase();
+    if (!(await consumePublicRateLimit({ key: "signup-email:" + emailKey, limit: 3 }))) {
+      return json(res, 429, { error: "SIGNUP_RATE_LIMITED" });
+    }
     try {
       const result = await registerSelfServeOwner({
         email: body.email,
@@ -649,6 +659,7 @@ export async function handleMilestoneHPlatformRoute({
 }
 
 export async function runMilestoneHMaintenance(limit = 25) {
+  await purgePublicRateLimits();
   const candidates = await listOnboardingReadyForReport(limit);
   const results = [];
   for (const candidate of candidates) {

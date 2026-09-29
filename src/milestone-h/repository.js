@@ -28,6 +28,36 @@ function mapOnboarding(row) {
     : null;
 }
 
+export async function consumePublicRateLimit({
+  key,
+  limit,
+}) {
+  const keyHash = sha256(key);
+  const result = await pool.query(
+    `INSERT INTO platform_public_rate_buckets (
+       key_hash, bucket_start, request_count
+     )
+     VALUES (
+       $1,
+       date_trunc('hour', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC',
+       1
+     )
+     ON CONFLICT (key_hash, bucket_start)
+     DO UPDATE SET request_count = platform_public_rate_buckets.request_count + 1
+     RETURNING request_count`,
+    [keyHash],
+  );
+  return Number(result.rows[0].request_count) <= Number(limit);
+}
+
+export async function purgePublicRateLimits() {
+  const result = await pool.query(
+    `DELETE FROM platform_public_rate_buckets
+      WHERE bucket_start < now() - interval '48 hours'`,
+  );
+  return result.rowCount;
+}
+
 export async function getWorkspaceOnboarding(workspaceId) {
   await pool.query(
     `INSERT INTO workspace_onboarding (workspace_id)

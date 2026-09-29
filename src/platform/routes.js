@@ -176,6 +176,44 @@ function normalizeTarget(body, badRequest) {
   };
 }
 
+function safeApprovalPayloadSummary(approval) {
+  if (approval.action_type === "SOURCE_REMEDIATION") {
+    return {
+      projectRootConfigured: Boolean(approval.payload?.projectRoot),
+    };
+  }
+  if (approval.action_type === "REPORT_RELEASE") {
+    return {
+      reportId: approval.report_id || null,
+    };
+  }
+  if (approval.action_type === "OUTBOUND_CONTACT") {
+    return {
+      commercialActionId: approval.commercial_action_id || null,
+    };
+  }
+  return {};
+}
+
+function mapApprovalContext(approval) {
+  return {
+    id: approval.id,
+    targetId: approval.target_id,
+    findingId: approval.finding_id,
+    reportId: approval.report_id,
+    commercialActionId: approval.commercial_action_id,
+    actionType: approval.action_type,
+    status: approval.status,
+    requestedBy: approval.requested_by,
+    decidedBy: approval.decided_by,
+    decisionNote: approval.decision_note,
+    expiresAt: approval.expires_at,
+    createdAt: approval.created_at,
+    decidedAt: approval.decided_at,
+    payloadSummary: safeApprovalPayloadSummary(approval),
+  };
+}
+
 function normalizeProjectRoot(value, badRequest) {
   const root = String(value || "").trim();
   if (!root || root.length > 1024) throw badRequest("projectRoot is invalid");
@@ -591,6 +629,67 @@ export async function handlePlatformRoute({
         status: url.searchParams.get("status"),
         limit: url.searchParams.get("limit") || 100,
       }),
+    });
+  }
+
+  match = url.pathname.match(
+    /^\/v1\/platform\/workspaces\/([0-9a-f-]+)\/approvals\/([0-9a-f-]+)$/i,
+  );
+  if (req.method === "GET" && match) {
+    await requireWorkspace(principal, match[1], {
+      minimumRole: "VIEWER",
+      apiScope: "workspace:read",
+    });
+    const approval = await approvalBelongsToWorkspace(match[2], match[1]);
+    if (!approval) {
+      return json(res, 404, { error: "APPROVAL_NOT_FOUND" });
+    }
+
+    const [target, finding, authorization] = await Promise.all([
+      getTarget(approval.target_id),
+      approval.finding_id ? getFindingContext(approval.finding_id) : null,
+      getCurrentAuthorization(approval.target_id),
+    ]);
+
+    return json(res, 200, {
+      approval: mapApprovalContext(approval),
+      target,
+      authorization: authorization
+        ? {
+            id: authorization.id,
+            mode: authorization.mode,
+            allowedHosts: authorization.allowedHosts,
+            allowedCapabilities: authorization.allowedCapabilities,
+            expiresAt: authorization.expiresAt,
+            createdAt: authorization.createdAt,
+          }
+        : null,
+      finding: finding
+        ? {
+            id: finding.id,
+            title: finding.title,
+            category: finding.category,
+            severity: finding.severity,
+            status: finding.status,
+            confidence: finding.confidence,
+            affectedUrl: finding.affectedUrl,
+            verification: finding.verification
+              ? {
+                  status: finding.verification.status,
+                  confidence: finding.verification.confidence,
+                  createdAt: finding.verification.createdAt,
+                }
+              : null,
+            intelligence: finding.intelligence
+              ? {
+                  opportunityScore: finding.intelligence.opportunityScore,
+                  impactTier: finding.intelligence.impactTier,
+                  affectedJourney: finding.intelligence.affectedJourney,
+                  rationale: finding.intelligence.rationale,
+                }
+              : null,
+          }
+        : null,
     });
   }
 

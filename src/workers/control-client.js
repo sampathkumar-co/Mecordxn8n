@@ -205,12 +205,13 @@ export function recordMonitoringFailure({
   policyId,
   targetId,
   error,
+  workerId,
 }) {
   return workerApiRequest(
     controlApiUrl,
     workerToken,
     `/v1/worker/milestone-b/jobs/${jobId}/monitoring-failure`,
-    { policyId, targetId, error },
+    { policyId, targetId, error, workerId },
   );
 }
 
@@ -221,12 +222,13 @@ export function recordRepairOutcome({
   remediationRequestId,
   findingId,
   learning,
+  workerId,
 }) {
   return workerApiRequest(
     controlApiUrl,
     workerToken,
     `/v1/worker/milestone-b/jobs/${jobId}/repair-outcome`,
-    { remediationRequestId, findingId, learning },
+    { remediationRequestId, findingId, learning, workerId },
   );
 }
 

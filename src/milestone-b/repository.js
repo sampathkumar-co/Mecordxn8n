@@ -19,6 +19,19 @@ function mapApproval(row) {
   };
 }
 
+export async function getActiveLease(jobId, workerId) {
+  const result = await pool.query(
+    `SELECT id, target_id, input
+       FROM jobs
+      WHERE id = $1
+        AND state = 'RUNNING'
+        AND lease_owner = $2
+        AND lease_expires_at > now()`,
+    [jobId, workerId],
+  );
+  return result.rows[0] || null;
+}
+
 function mapPolicy(row) {
   return {
     id: row.id,
@@ -411,9 +424,19 @@ export async function recordMonitoringRunFromLease({
 export async function recordMonitoringFailure({
   policyId,
   jobId,
-  targetId,
+  workerId,
   error,
 }) {
+  const lease = await getActiveLease(jobId, workerId);
+  if (!lease) return null;
+
+  const policy = await pool.query(
+    `SELECT id FROM monitoring_policies
+      WHERE id = $1 AND target_id = $2`,
+    [policyId, lease.target_id],
+  );
+  if (policy.rowCount === 0) return null;
+
   await pool.query(
     `UPDATE monitoring_policies
         SET consecutive_failures = consecutive_failures + 1,
@@ -426,8 +449,9 @@ export async function recordMonitoringFailure({
     `INSERT INTO operational_events (
        component, event_type, severity, job_id, target_id, payload
      ) VALUES ('monitoring','MONITOR_RUN_FAILED','ERROR',$1,$2,$3::jsonb)`,
-    [jobId, targetId, JSON.stringify(error || {})],
+    [jobId, lease.target_id, JSON.stringify(error || {})],
   );
+  return { recorded: true, targetId: lease.target_id };
 }
 
 export async function listOpenRegressions(targetId) {

@@ -69,3 +69,25 @@ n8n never decides whether a target is allowed to run and never approves remediat
 ## Human approval
 
 There is intentionally no workflow that auto-approves source remediation or report release. Approval remains an explicit control-API/user action so retries, schedules, or an AI workflow cannot silently grant authority.
+
+## Commercial maintenance
+
+Import `workflows/commercial-maintenance.json` only after reviewing the commercial policy and environment.
+
+It runs every 15 minutes and calls the authenticated `POST /v1/commercial/maintenance` Control API endpoint. The response is an internal worklist containing:
+
+- opportunities whose next action is due,
+- active services with renewals due within seven days,
+- outbound actions that already passed human approval and still require manual/provider handling.
+
+The workflow is inactive on import.
+
+It deliberately does **not**:
+
+- discover or scrape personal contact data,
+- grant contact consent,
+- approve outbound actions,
+- send email, WhatsApp, SMS, or phone messages,
+- bypass cooldowns or activation caps.
+
+Any future delivery-provider workflow must consume only Control-API-approved action IDs and must record its result back through the commercial delivery endpoint. Policy remains in PostgreSQL/Control API, not n8n.

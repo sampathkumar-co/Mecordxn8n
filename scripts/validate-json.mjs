@@ -10,6 +10,7 @@ const paths = [
   "n8n/workflows/finding-verification-dispatch.json",
   "n8n/workflows/remediation-dispatch.json",
   "n8n/workflows/production-maintenance.json",
+  "n8n/workflows/commercial-maintenance.json",
 ];
 
 for (const path of paths) {

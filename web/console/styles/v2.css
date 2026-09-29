@@ -625,3 +625,147 @@ body {
     animation-iteration-count: 1 !important;
   }
 }
+
+
+.partial-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 9px 11px;
+  border: 1px solid #fedf89;
+  border-radius: 6px;
+  background: var(--v2-warn-soft);
+  color: #7a2e0e;
+  font-size: 11px;
+}
+
+.partial-banner span {
+  color: #9c4a16;
+}
+
+.home-metrics {
+  margin-bottom: 14px;
+}
+
+.home-metric .value {
+  font-size: 25px;
+}
+
+.home-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(270px, .7fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.home-side {
+  display: grid;
+  gap: 14px;
+}
+
+.action-queue {
+  min-height: 420px;
+}
+
+.section-degraded {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin: 8px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--v2-border);
+  border-radius: 6px;
+  background: var(--v2-surface-subtle);
+  font-size: 10px;
+}
+
+.section-degraded strong {
+  color: var(--v2-warn);
+}
+
+.section-degraded span {
+  color: var(--v2-muted);
+}
+
+.action-list {
+  display: grid;
+  gap: 1px;
+  border: 1px solid var(--v2-border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--v2-border);
+}
+
+.action-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 110px minmax(0,1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 0;
+  background: var(--v2-surface);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.action-row:hover,
+.action-row:focus-visible {
+  outline: 0;
+  background: #f8faff;
+}
+
+.action-kind {
+  color: #475467;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.action-main {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.action-main strong {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.action-main small {
+  overflow: hidden;
+  color: var(--v2-muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 980px) {
+  .home-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .home-side {
+    grid-template-columns: repeat(2, minmax(0,1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .home-side {
+    grid-template-columns: 1fr;
+  }
+
+  .action-row {
+    grid-template-columns: 1fr auto;
+  }
+
+  .action-kind {
+    grid-column: 1 / -1;
+  }
+}

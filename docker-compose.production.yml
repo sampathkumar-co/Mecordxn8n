@@ -3,6 +3,8 @@ services:
     ports: []
     expose:
       - "8080"
+    environment:
+      TRUST_PROXY_HEADERS: "true"
 
   n8n:
     ports: []

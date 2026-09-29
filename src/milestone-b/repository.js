@@ -21,6 +21,7 @@ function mapApproval(row) {
     targetId: row.target_id,
     findingId: row.finding_id,
     reportId: row.report_id,
+    commercialActionId: row.commercial_action_id,
     actionType: row.action_type,
     payload: row.payload,
     status: row.status,
@@ -69,6 +70,7 @@ export async function createApprovalRequest({
   targetId,
   findingId = null,
   reportId = null,
+  commercialActionId = null,
   actionType,
   payload,
   requestedBy = "system",
@@ -77,15 +79,16 @@ export async function createApprovalRequest({
   const safeMinutes = Math.min(Math.max(Number(expiresMinutes) || 120, 5), 1440);
   const result = await pool.query(
     `INSERT INTO approval_requests (
-       target_id, finding_id, report_id, action_type, payload,
-       requested_by, expires_at
+       target_id, finding_id, report_id, commercial_action_id,
+       action_type, payload, requested_by, expires_at
      )
-     VALUES ($1,$2,$3,$4,$5::jsonb,$6,now() + ($7 * interval '1 minute'))
+     VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,now() + ($8 * interval '1 minute'))
      RETURNING *`,
     [
       targetId,
       findingId,
       reportId,
+      commercialActionId,
       actionType,
       JSON.stringify(payload || {}),
       requestedBy,

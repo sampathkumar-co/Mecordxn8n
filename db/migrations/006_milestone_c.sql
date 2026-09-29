@@ -176,18 +176,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS commercial_action_approval_unique
   ON commercial_actions(approval_id)
   WHERE approval_id IS NOT NULL;
 
-DO $
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1
-      FROM pg_constraint
-     WHERE conname = 'commercial_actions_approval_fk'
-  ) THEN
-    ALTER TABLE commercial_actions
-      ADD CONSTRAINT commercial_actions_approval_fk
-      FOREIGN KEY (approval_id)
-      REFERENCES approval_requests(id)
-      ON DELETE SET NULL;
-  END IF;
-END
-$;
+ALTER TABLE commercial_actions
+  DROP CONSTRAINT IF EXISTS commercial_actions_approval_fk;
+
+ALTER TABLE commercial_actions
+  ADD CONSTRAINT commercial_actions_approval_fk
+  FOREIGN KEY (approval_id)
+  REFERENCES approval_requests(id)
+  ON DELETE SET NULL;

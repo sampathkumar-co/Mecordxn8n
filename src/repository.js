@@ -220,23 +220,34 @@ export async function leaseNextJob({
 
     const result = await client.query(
       `WITH candidate AS (
-         SELECT id
-           FROM jobs
-          WHERE capability = ANY($1::text[])
-            AND attempt_count < max_attempts
+         SELECT j.id
+           FROM jobs j
+           JOIN authorizations a ON a.id = j.authorization_id
+          WHERE j.capability = ANY($1::text[])
+            AND j.attempt_count < j.max_attempts
+            AND a.revoked_at IS NULL
+            AND (a.expires_at IS NULL OR a.expires_at > now())
+            AND NOT EXISTS (
+              SELECT 1
+                FROM jobs active
+               WHERE active.target_id = j.target_id
+                 AND active.id <> j.id
+                 AND active.state = 'RUNNING'
+                 AND active.lease_expires_at > now()
+            )
             AND (
               (
-                state = 'QUEUED'
-                AND (next_attempt_at IS NULL OR next_attempt_at <= now())
+                j.state = 'QUEUED'
+                AND (j.next_attempt_at IS NULL OR j.next_attempt_at <= now())
               )
               OR (
-                state = 'RUNNING'
-                AND lease_expires_at IS NOT NULL
-                AND lease_expires_at <= now()
+                j.state = 'RUNNING'
+                AND j.lease_expires_at IS NOT NULL
+                AND j.lease_expires_at <= now()
               )
             )
-          ORDER BY COALESCE(next_attempt_at, created_at), created_at
-          FOR UPDATE SKIP LOCKED
+          ORDER BY COALESCE(j.next_attempt_at, j.created_at), j.created_at
+          FOR UPDATE OF j SKIP LOCKED
           LIMIT 1
        )
        UPDATE jobs AS j
@@ -499,6 +510,13 @@ export async function heartbeatLeasedJob({
         AND lease_owner = $2
         AND state = 'RUNNING'
         AND lease_expires_at > now()
+        AND EXISTS (
+          SELECT 1
+            FROM authorizations a
+           WHERE a.id = jobs.authorization_id
+             AND a.revoked_at IS NULL
+             AND (a.expires_at IS NULL OR a.expires_at > now())
+        )
       RETURNING id, lease_expires_at, last_heartbeat_at`,
     [jobId, workerId, safeSeconds],
   );

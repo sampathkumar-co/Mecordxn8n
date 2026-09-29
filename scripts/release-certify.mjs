@@ -32,6 +32,8 @@ const requiredFiles = [
   "web/console/views/home.js",
   "web/console/views/approval-detail.js",
   "web/console/views/target-detail.js",
+  "web/console/views/run-detail.js",
+  "web/console/views/runs.js",
   "web/console/views/approvals.js",
   "web/console/components/evidence.js",
   "web/console/core/router.js",

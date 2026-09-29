@@ -28,8 +28,10 @@ import {
   recordCommercialDelivery,
   recordCommercialResponse,
   recordRevenueEvent,
+  reconcileExpiredCommercialApprovals,
   rejectCommercialAction,
   transitionCommercialOpportunity,
+  updateServiceAgreement,
   updateCommercialConsent,
   updateCommercialPolicy,
 } from "./repository.js";
@@ -155,6 +157,9 @@ export async function handleMilestoneCRoute({
       ),
     });
 
+    if (result.status === "EXPIRED") {
+      await reconcileExpiredCommercialApprovals(10);
+    }
     const failure = approvalFailure(json, res, result);
     if (failure) return failure;
 
@@ -774,6 +779,28 @@ export async function handleMilestoneCRoute({
       return json(res, 404, { error: "COMMERCIAL_OPPORTUNITY_NOT_FOUND" });
     }
     return json(res, 201, service);
+  }
+
+  match = url.pathname.match(/^\/v1\/services\/([0-9a-f-]+)\/transition$/i);
+  if (req.method === "POST" && match) {
+    if (!validId(match[1])) throw badRequest("service id is invalid");
+    const body = await readJson(req);
+    const status = String(body.status || "").trim().toUpperCase();
+    if (!["ACTIVE", "PAUSED", "CANCELLED", "ENDED"].includes(status)) {
+      throw badRequest("service status is invalid");
+    }
+    const service = await updateServiceAgreement({
+      serviceId: match[1],
+      status,
+      renewalAt:
+        body.renewalAt === undefined
+          ? undefined
+          : parseDate(body.renewalAt, "renewalAt", badRequest),
+    });
+    if (!service) {
+      return json(res, 404, { error: "SERVICE_AGREEMENT_NOT_FOUND" });
+    }
+    return json(res, 200, service);
   }
 
   if (req.method === "GET" && url.pathname === "/v1/revenue/metrics") {

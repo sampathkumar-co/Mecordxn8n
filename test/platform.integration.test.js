@@ -262,6 +262,34 @@ test(
       assert.equal(over.body.error, "PLAN_TARGET_LIMIT");
     });
 
+    await t.test("approval context is tenant-bound and hides remediation project roots", async () => {
+      const inserted = await pool.query(
+        `INSERT INTO approval_requests (
+           target_id, action_type, payload, requested_by, expires_at
+         )
+         VALUES ($1, 'SOURCE_REMEDIATION', $2::jsonb, 'owner@example.test', now() + interval '2 hours')
+         RETURNING id`,
+        [targetA.id, JSON.stringify({ projectRoot: "C:\\Sensitive\\CustomerRepo" })],
+      );
+      const approvalId = inserted.rows[0].id;
+
+      const context = await request(
+        `/v1/platform/workspaces/${workspaceA.id}/approvals/${approvalId}`,
+        { token: ownerToken },
+      );
+      assert.equal(context.status, 200);
+      assert.equal(context.body.approval.actionType, "SOURCE_REMEDIATION");
+      assert.equal(context.body.approval.payloadSummary.projectRootConfigured, true);
+      assert.equal(context.body.target.id, targetA.id);
+      assert.doesNotMatch(JSON.stringify(context.body), /Sensitive|CustomerRepo|projectRoot":/);
+
+      const crossTenant = await request(
+        `/v1/platform/workspaces/${workspaceB.id}/approvals/${approvalId}`,
+        { token: ownerToken },
+      );
+      assert.equal(crossTenant.status, 404);
+    });
+
     let viewerToken;
     await t.test("invite-only viewer cannot cross tenants or mutate", async () => {
       await pool.query(

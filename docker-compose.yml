@@ -22,6 +22,7 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       DB_POOL_MAX: ${DB_POOL_MAX:-10}
       ORCHESTRATOR_TOKEN: ${ORCHESTRATOR_TOKEN}
+      WORKER_TOKEN: ${WORKER_TOKEN}
     depends_on:
       postgres:
         condition: service_healthy
@@ -29,6 +30,20 @@ services:
       sh -c "node scripts/migrate.mjs && node src/server.js"
     ports:
       - "127.0.0.1:8080:8080"
+
+  http-observer:
+    build: .
+    restart: unless-stopped
+    environment:
+      MECORDXN8N_CONTROL_API_URL: http://control-api:8080
+      WORKER_TOKEN: ${WORKER_TOKEN}
+      WORKER_TRIGGER_TOKEN: ${WORKER_TRIGGER_TOKEN}
+      WORKER_ID: public-http-observer
+      WORKER_PORT: 8090
+    depends_on:
+      control-api:
+        condition: service_started
+    command: node src/workers/http-observer-service.js
 
   n8n:
     image: docker.n8n.io/n8nio/n8n:latest
@@ -49,10 +64,14 @@ services:
       N8N_RUNNERS_ENABLED: "true"
       MECORDXN8N_CONTROL_API_URL: ${MECORDXN8N_CONTROL_API_URL:-http://control-api:8080}
       MECORDXN8N_ORCHESTRATOR_TOKEN: ${MECORDXN8N_ORCHESTRATOR_TOKEN}
+      MECORDXN8N_HTTP_OBSERVER_URL: ${MECORDXN8N_HTTP_OBSERVER_URL:-http://http-observer:8090}
+      MECORDXN8N_WORKER_TRIGGER_TOKEN: ${MECORDXN8N_WORKER_TRIGGER_TOKEN}
     depends_on:
       postgres:
         condition: service_healthy
       control-api:
+        condition: service_started
+      http-observer:
         condition: service_started
     ports:
       - "127.0.0.1:5678:5678"

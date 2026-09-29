@@ -332,6 +332,12 @@ export function createServer({
 
       if (req.method === "POST" && url.pathname === "/v1/jobs") {
         const body = normalizeJobInput(await readJson(req));
+        if (body.capability === CAPABILITIES.SOURCE_REMEDIATION) {
+          return json(res, 403, {
+            error: "APPROVAL_REQUIRED",
+            message: "source remediation must be requested through the finding approval flow",
+          });
+        }
         const authorization = await getCurrentAuthorization(body.targetId);
 
         let decision;

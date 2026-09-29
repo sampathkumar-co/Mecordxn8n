@@ -1,0 +1,75 @@
+name: Release Gate
+
+on:
+  push:
+    branches:
+      - "build/v1-productization"
+      - main
+  pull_request:
+    branches:
+      - "build/foundation-v1"
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: mecordxn8n_release
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d mecordxn8n_release"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/mecordxn8n_release
+      RESTORE_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/mecordxn8n_restore
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      PLATFORM_MASTER_KEY: release-gate-master-key-must-be-at-least-32-characters
+      BOOTSTRAP_TOKEN: release-gate-bootstrap-token
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run migrate
+      - run: npm run check
+      - name: Synthetic benchmark
+        run: node scripts/benchmark.mjs
+      - name: Secret scan
+        run: node scripts/secret-scan.mjs
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Backup database
+        run: node scripts/backup-database.mjs artifacts/database.backup
+      - name: Create clean restore database
+        env:
+          PGPASSWORD: postgres
+        run: createdb -h 127.0.0.1 -U postgres mecordxn8n_restore
+      - name: Restore verification
+        run: node scripts/restore-verify.mjs artifacts/database.backup
+      - name: Release certification
+        run: node scripts/release-certify.mjs
+      - name: Validate Docker Compose
+        run: docker compose --env-file .env.example config >/dev/null
+      - name: Build production images
+        run: |
+          docker build -t mecordxn8n-control:release .
+          docker build -f Dockerfile.browser -t mecordxn8n-browser:release .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-certification
+          path: |
+            artifacts/release-certification.json
+            artifacts/database.backup.json

@@ -250,6 +250,7 @@ export async function runPublicHttpObserverOnce({
         jobId: job.id,
         policyId: job.input.monitoringPolicyId,
         targetId: job.targetId,
+        workerId,
         error: {
           code: error.code || "OBSERVATION_FAILED",
           message: error.message,

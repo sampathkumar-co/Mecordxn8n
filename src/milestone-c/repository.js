@@ -1139,6 +1139,104 @@ export async function createServiceAgreement({
   }
 }
 
+export async function reconcileExpiredCommercialApprovals(limit = 100) {
+  const safeLimit = Math.min(Math.max(Math.trunc(Number(limit) || 100), 1), 500);
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const candidates = await client.query(
+      `SELECT a.id, a.target_id, a.approval_id
+         FROM commercial_actions a
+         JOIN approval_requests ar ON ar.id = a.approval_id
+        WHERE a.state = 'PENDING_APPROVAL'
+          AND ar.action_type = 'OUTBOUND_CONTACT'
+          AND ar.status = 'EXPIRED'
+        ORDER BY ar.decided_at NULLS LAST, ar.expires_at
+        FOR UPDATE OF a SKIP LOCKED
+        LIMIT $1`,
+      [safeLimit],
+    );
+
+    for (const row of candidates.rows) {
+      await client.query(
+        `UPDATE commercial_actions
+            SET state = 'DRAFT',
+                approval_id = NULL,
+                failure_code = 'APPROVAL_EXPIRED',
+                updated_at = now()
+          WHERE id = $1`,
+        [row.id],
+      );
+      await audit(client, row.target_id, "OUTBOUND_APPROVAL_RECONCILED", {
+        actionId: row.id,
+        approvalId: row.approval_id,
+      });
+    }
+
+    await client.query("COMMIT");
+    return candidates.rows.length;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function updateServiceAgreement({
+  serviceId,
+  status,
+  renewalAt = undefined,
+}) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const current = await client.query(
+      "SELECT * FROM service_agreements WHERE id = $1 FOR UPDATE",
+      [serviceId],
+    );
+    if (current.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+    const row = current.rows[0];
+    if (
+      ["CANCELLED", "ENDED"].includes(row.status) &&
+      status !== row.status
+    ) {
+      throw problem(
+        "SERVICE_STATE_TERMINAL",
+        "cancelled or ended service agreements cannot be reactivated",
+      );
+    }
+    const result = await client.query(
+      `UPDATE service_agreements
+          SET status = $2,
+              renewal_at = CASE
+                WHEN $3::boolean THEN $4::timestamptz
+                ELSE renewal_at
+              END,
+              updated_at = now()
+        WHERE id = $1
+        RETURNING *`,
+      [serviceId, status, renewalAt !== undefined, renewalAt ?? null],
+    );
+    await audit(client, row.target_id, "SERVICE_AGREEMENT_UPDATED", {
+      serviceAgreementId: serviceId,
+      opportunityId: row.opportunity_id,
+      from: row.status,
+      to: status,
+    });
+    await client.query("COMMIT");
+    return result.rows[0];
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function getRevenueMetrics() {
   const [pipeline, revenue, services, followups, actions] = await Promise.all([
     pool.query(
@@ -1204,6 +1302,8 @@ export async function getRevenueMetrics() {
 
 export async function getCommercialMaintenance(limit = 100) {
   const safeLimit = Math.min(Math.max(Math.trunc(Number(limit) || 100), 1), 500);
+  const reconciledExpiredApprovals =
+    await reconcileExpiredCommercialApprovals(safeLimit);
   const [opportunities, renewals, approvedActions] = await Promise.all([
     pool.query(
       `SELECT id, target_id, state, next_action_at
@@ -1236,6 +1336,7 @@ export async function getCommercialMaintenance(limit = 100) {
   ]);
 
   return {
+    reconciledExpiredApprovals,
     dueOpportunities: opportunities.rows,
     dueRenewals: renewals.rows,
     approvedManualActions: approvedActions.rows,

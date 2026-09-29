@@ -132,22 +132,13 @@ export async function runRemediationOnce({
       job: completed,
     };
   } catch (error) {
-    const completed = await completeJob({
-      controlApiUrl,
-      workerToken,
-      workerId,
-      jobId: job.id,
-      state: "FAILED",
-      error: {
-        code: error.code || "REMEDIATION_FAILED",
-        message: error.message,
-      },
-    }).catch(() => null);
+    const finalAttempt =
+      Number(job.attemptCount || 0) >= Number(job.maxAttempts || 3);
 
-    // Bounded retries leave the remediation request queued. Only final
-    // dead-letter exhaustion is recorded as a failed repair outcome.
-    if (completed?.state === "DEAD_LETTER") {
-      const remediationRecord = await recordRemediationResult({
+    let remediationRecord = null;
+    if (finalAttempt) {
+      // Record final failure while this worker still owns the live lease.
+      remediationRecord = await recordRemediationResult({
         controlApiUrl,
         workerToken,
         jobId: job.id,
@@ -175,6 +166,18 @@ export async function runRemediationOnce({
         }).catch(() => {});
       }
     }
+
+    await completeJob({
+      controlApiUrl,
+      workerToken,
+      workerId,
+      jobId: job.id,
+      state: "FAILED",
+      error: {
+        code: error.code || "REMEDIATION_FAILED",
+        message: error.message,
+      },
+    }).catch(() => null);
 
     throw error;
   } finally {

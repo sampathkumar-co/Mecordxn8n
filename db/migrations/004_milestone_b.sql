@@ -102,9 +102,12 @@ CREATE TABLE IF NOT EXISTS regressions (
   evidence jsonb NOT NULL DEFAULT '{}'::jsonb,
   status text NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN', 'RESOLVED', 'DISMISSED')),
   created_at timestamptz NOT NULL DEFAULT now(),
-  resolved_at timestamptz,
-  UNIQUE(policy_id, fingerprint, status)
+  resolved_at timestamptz
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS regressions_one_open_fingerprint
+  ON regressions(policy_id, fingerprint)
+  WHERE status = 'OPEN';
 
 CREATE INDEX IF NOT EXISTS regressions_open_idx
   ON regressions(policy_id, status, created_at DESC);
@@ -159,3 +162,14 @@ CREATE TABLE IF NOT EXISTS daily_usage (
   job_count integer NOT NULL DEFAULT 0 CHECK (job_count >= 0),
   PRIMARY KEY (target_id, usage_date)
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS jobs_approval_id_unique
+  ON jobs ((input->>'approvalId'))
+  WHERE input ? 'approvalId';
+
+CREATE UNIQUE INDEX IF NOT EXISTS monitoring_runs_job_unique
+  ON monitoring_runs(job_id)
+  WHERE job_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS repair_outcomes_request_unique
+  ON repair_outcomes(remediation_request_id);

@@ -5,10 +5,10 @@
 The system is deliberately split into three layers:
 
 1. **n8n** owns orchestration, retries, schedules, fan-out, and integrations.
-2. **Control API** owns authorization and durable job state.
-3. **Mecord Connect / MCP workers** execute only jobs that have already been authorized.
+2. **Control API** owns authorization, durable job state, worker leases, findings, and audit events.
+3. **Workers / Mecord Connect / MCP** execute only jobs that have already been authorized.
 
-No scanner or remediation worker should accept a raw target URL directly from an external caller.
+No scanner or remediation worker accepts a raw target URL directly from an external caller. n8n triggers workers to lease jobs from the control API.
 
 ## Authorization modes
 
@@ -54,8 +54,9 @@ Rejects all job requests.
 - Host grants are exact in V1; subdomains are not inferred.
 - Privileged capabilities are never inferred from an authorization mode.
 - Every denied and accepted job request creates an audit event.
+- Workers must own a non-expired lease before writing findings or completing jobs.
 
-## Initial job lifecycle
+## Implemented lifecycle
 
 ```text
 n8n / MCP ingress
@@ -75,7 +76,29 @@ audit      create QUEUED job
 event      + audit event
             |
             v
-       future worker
+        worker lease
+            |
+      +-----+---------------------+
+      |                           |
+      v                           v
+PUBLIC_HTTP_OBSERVE           BROWSER_QA
+      |                           |
+safe GET observation          passive Chromium load
+      |                       no clicks / mutations
+      +-------------+-------------+
+                    |
+                    v
+             findings/evidence
+                    |
+                    v
+           complete leased job
+                    |
+                    v
+                audit log
 ```
 
-The next build slice adds lease-based workers, findings/evidence storage, and the first benign browser-QA worker.
+## Browser QA boundary
+
+The browser worker is intentionally observation-only. It blocks non-read request methods, private/reserved destinations, non-standard ports, and cross-host top-level redirects. It captures bounded console errors, page runtime exceptions, same-site HTTP failures, and same-site request failures.
+
+A later module will add richer evidence artifacts and independent finding verification before any Mecord remediation handoff.

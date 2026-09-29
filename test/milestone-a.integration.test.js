@@ -209,5 +209,5 @@ test("new Milestone A routes return 403 when capability is not granted", { skip:
   });
 
   assert.equal(journey.status, 403);
-  assert.equal(journey.body.error, "BAD_REQUEST");
+  assert.equal(journey.body.error, "CAPABILITY_NOT_GRANTED");
 });

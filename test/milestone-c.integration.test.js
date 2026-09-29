@@ -652,5 +652,76 @@ test(
         (item) => item.id === service.body.id,
       ),
     );
+
+    const paused = await request(
+      `/v1/services/${service.body.id}/transition`,
+      { method: "POST", body: { status: "PAUSED" } },
+    );
+    assert.equal(paused.status, 200);
+    assert.equal(paused.body.status, "PAUSED");
+    const resumed = await request(
+      `/v1/services/${service.body.id}/transition`,
+      { method: "POST", body: { status: "ACTIVE" } },
+    );
+    assert.equal(resumed.status, 200);
+    const cancelled = await request(
+      `/v1/services/${service.body.id}/transition`,
+      { method: "POST", body: { status: "CANCELLED" } },
+    );
+    assert.equal(cancelled.status, 200);
+    const illegalResume = await request(
+      `/v1/services/${service.body.id}/transition`,
+      { method: "POST", body: { status: "ACTIVE" } },
+    );
+    assert.equal(illegalResume.status, 409);
+    assert.equal(illegalResume.body.error, "SERVICE_STATE_TERMINAL");
+  },
+);
+
+test(
+  "expired outbound approvals reconcile back to a safe draft",
+  { skip: !enabled },
+  async () => {
+    const fixture = await createVerifiedFixture("commercial-expiry.example.com");
+    const opportunity = await createOpportunity(fixture);
+    const contact = await createContact(
+      fixture.target.id,
+      "expiry@example.com",
+      "OPTED_IN",
+    );
+    const action = await createAction(
+      opportunity.id,
+      contact.id,
+      fixture.report.id,
+    );
+    const pending = await request(
+      `/v1/outbound-actions/${action.id}/request-approval`,
+      { method: "POST", body: { requestedBy: "owner" } },
+    );
+    assert.equal(pending.status, 202);
+
+    await pool.query(
+      "UPDATE approval_requests SET expires_at = now() - interval '1 second' WHERE id = $1",
+      [pending.body.approval.id],
+    );
+    const expired = await request(
+      `/v1/approvals/${pending.body.approval.id}/approve`,
+      { method: "POST", body: { decidedBy: "late-owner" } },
+    );
+    assert.equal(expired.status, 409);
+    assert.equal(expired.body.error, "APPROVAL_EXPIRED");
+
+    const reconciled = await request(`/v1/outbound-actions/${action.id}`);
+    assert.equal(reconciled.status, 200);
+    assert.equal(reconciled.body.state, "DRAFT");
+    assert.equal(reconciled.body.approvalId, null);
+    assert.equal(reconciled.body.failureCode, "APPROVAL_EXPIRED");
+
+    const retried = await request(
+      `/v1/outbound-actions/${action.id}/request-approval`,
+      { method: "POST", body: { requestedBy: "owner" } },
+    );
+    assert.equal(retried.status, 202);
+    assert.notEqual(retried.body.approval.id, pending.body.approval.id);
   },
 );

@@ -754,28 +754,40 @@ export async function recordCommercialDelivery({
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    const lookup = await client.query(
+      "SELECT id, contact_id FROM commercial_actions WHERE id = $1",
+      [actionId],
+    );
+    if (lookup.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+
+    const contactResult = await client.query(
+      "SELECT * FROM commercial_contacts WHERE id = $1 FOR UPDATE",
+      [lookup.rows[0].contact_id],
+    );
     const current = await client.query(
       "SELECT * FROM commercial_actions WHERE id = $1 FOR UPDATE",
       [actionId],
     );
-    if (current.rowCount === 0) {
+    const action = current.rows[0];
+    if (!action) {
       await client.query("ROLLBACK");
       return null;
     }
-    const action = current.rows[0];
     if (action.state === state) {
       await client.query("COMMIT");
       return mapAction(action);
     }
     if (action.state !== "APPROVED") {
-      throw problem("ACTION_NOT_APPROVED", "commercial action is not approved for delivery recording");
+      throw problem(
+        "ACTION_NOT_APPROVED",
+        "commercial action is not approved for delivery recording",
+      );
     }
 
     if (state === "SENT") {
-      const contactResult = await client.query(
-        "SELECT * FROM commercial_contacts WHERE id = $1 FOR UPDATE",
-        [action.contact_id],
-      );
       const consent = contactCanActivate(contactResult.rows[0]);
       if (!consent.ok) {
         await client.query(
@@ -842,6 +854,19 @@ export async function recordCommercialResponse({
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    const lookup = await client.query(
+      "SELECT id, contact_id FROM commercial_actions WHERE id = $1",
+      [actionId],
+    );
+    if (lookup.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+
+    await client.query(
+      "SELECT id FROM commercial_contacts WHERE id = $1 FOR UPDATE",
+      [lookup.rows[0].contact_id],
+    );
     const actionResult = await client.query(
       "SELECT * FROM commercial_actions WHERE id = $1 FOR UPDATE",
       [actionId],
@@ -885,16 +910,31 @@ export async function recordCommercialResponse({
           WHERE id = $1`,
         [action.contact_id, `response:${response.rows[0].id}`],
       );
-      await client.query(
+      const blocked = await client.query(
         `UPDATE commercial_actions
             SET state = 'BLOCKED',
                 failure_code = 'CONTACT_OPTED_OUT',
                 updated_at = now()
           WHERE contact_id = $1
             AND id <> $2
-            AND state IN ('DRAFT','PENDING_APPROVAL','APPROVED')`,
+            AND state IN ('DRAFT','PENDING_APPROVAL','APPROVED')
+          RETURNING id`,
         [action.contact_id, action.id],
       );
+      if (blocked.rows.length > 0) {
+        await client.query(
+          `UPDATE approval_requests
+              SET status = 'EXPIRED',
+                  decided_at = now(),
+                  decision_note = COALESCE(
+                    decision_note,
+                    'Recipient opted out before activation.'
+                  )
+            WHERE commercial_action_id = ANY($1::uuid[])
+              AND status = 'PENDING'`,
+          [blocked.rows.map((item) => item.id)],
+        );
+      }
     } else if (["REPLIED", "INTERESTED"].includes(responseType)) {
       await client.query(
         `UPDATE commercial_opportunities
@@ -983,6 +1023,18 @@ export async function recordRevenueEvent({
             AND external_reference = $3`,
         [opportunityId, kind, externalReference],
       );
+      if (inserted.rowCount > 0) {
+        const existing = inserted.rows[0];
+        if (
+          Number(existing.amount_minor) !== amountMinor ||
+          existing.currency !== currency
+        ) {
+          throw problem(
+            "IDEMPOTENCY_CONFLICT",
+            "revenue reference already exists with different immutable values",
+          );
+        }
+      }
       idempotent = true;
     }
 

@@ -365,6 +365,7 @@ export async function handleMilestoneBRoute({
     }
     if (result.status === "ALREADY_DECIDED") {
       if (
+        decision === "APPROVED" &&
         result.approval.status === "APPROVED" &&
         result.approval.actionType === "SOURCE_REMEDIATION"
       ) {
@@ -376,6 +377,7 @@ export async function handleMilestoneBRoute({
         });
       }
       if (
+        decision === "APPROVED" &&
         result.approval.status === "APPROVED" &&
         result.approval.actionType === "REPORT_RELEASE"
       ) {

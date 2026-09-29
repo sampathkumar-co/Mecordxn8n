@@ -1587,3 +1587,263 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+
+.repair-board {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(230px,1fr));
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.repair-column {
+  min-width: 230px;
+  border: 1px solid var(--v2-border);
+  border-radius: 8px;
+  background: var(--v2-surface-subtle);
+}
+
+.repair-column-head {
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  gap: 7px;
+  align-items: center;
+  padding: 10px;
+  border-bottom: 1px solid var(--v2-border);
+}
+
+.repair-column-head > span:first-child {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid #c7d7fe;
+  border-radius: 999px;
+  background: #eef4ff;
+  color: #3538cd;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.repair-column-head strong {
+  font-size: 11px;
+}
+
+.repair-column-head small {
+  color: var(--v2-muted);
+  font-size: 10px;
+}
+
+.repair-column-list {
+  display: grid;
+  gap: 7px;
+  padding: 8px;
+}
+
+.repair-card {
+  display: grid;
+  gap: 5px;
+  padding: 9px;
+  border: 1px solid var(--v2-border);
+  border-radius: 6px;
+  background: var(--v2-surface);
+}
+
+.repair-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+}
+
+.repair-card > strong {
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.repair-card > small {
+  color: var(--v2-muted);
+  font-size: 9px;
+  line-height: 1.35;
+}
+
+.repair-card-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding-top: 3px;
+  color: var(--v2-muted);
+  font-size: 9px;
+}
+
+.repair-card-error {
+  padding: 5px 6px;
+  border-radius: 4px;
+  background: var(--v2-danger-soft);
+  color: var(--v2-danger);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.repair-outcome-preview {
+  display: -webkit-box;
+  margin: 2px 0 0;
+  overflow: hidden;
+  color: #475467;
+  font-size: 9px;
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.repair-empty {
+  padding: 18px 10px;
+  color: var(--v2-muted);
+  font-size: 10px;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.repair-detail-layout {
+  display: grid;
+  grid-template-columns: minmax(0,1fr) minmax(280px,340px);
+  gap: 14px;
+  align-items: start;
+}
+
+.repair-detail-main,
+.repair-detail-side {
+  display: grid;
+  gap: 14px;
+}
+
+.repair-timeline {
+  list-style: none;
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.repair-timeline li {
+  position: relative;
+  display: grid;
+  grid-template-columns: 18px minmax(0,1fr);
+  gap: 8px;
+  min-height: 56px;
+}
+
+.repair-timeline li::before {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 14px;
+  bottom: -3px;
+  width: 1px;
+  background: var(--v2-border-strong);
+}
+
+.repair-timeline li:last-child::before {
+  display: none;
+}
+
+.repair-timeline-dot {
+  position: relative;
+  z-index: 1;
+  width: 11px;
+  height: 11px;
+  margin-top: 2px;
+  border: 2px solid #98a2b3;
+  border-radius: 999px;
+  background: var(--v2-surface);
+}
+
+.repair-timeline li.done .repair-timeline-dot {
+  border-color: #12b76a;
+  background: var(--v2-success-soft);
+}
+
+.repair-timeline li > div {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  padding-bottom: 12px;
+}
+
+.repair-timeline strong {
+  font-size: 11px;
+}
+
+.repair-timeline small {
+  color: var(--v2-muted);
+  font-size: 9px;
+}
+
+.repair-timeline p {
+  margin: 2px 0 0;
+  color: #475467;
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+.repair-outcome-card {
+  padding: 14px;
+}
+
+.repair-outcome-card h3 {
+  margin: 8px 0 5px;
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+.repair-outcome-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.repair-outcome-head span:last-child {
+  color: var(--v2-muted);
+  font-size: 9px;
+}
+
+.repair-url {
+  margin-top: 10px;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1100px) {
+  .repair-board {
+    grid-template-columns: repeat(2,minmax(260px,1fr));
+  }
+
+  .repair-detail-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .repair-detail-side {
+    grid-template-columns: repeat(2,minmax(0,1fr));
+  }
+
+  .repair-detail-side > section:last-child {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 720px) {
+  .repair-board {
+    grid-template-columns: 1fr;
+    overflow: visible;
+  }
+
+  .repair-detail-side {
+    grid-template-columns: 1fr;
+  }
+
+  .repair-detail-side > section:last-child {
+    grid-column: auto;
+  }
+}

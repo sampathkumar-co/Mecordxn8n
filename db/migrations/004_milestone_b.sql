@@ -173,3 +173,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS monitoring_runs_job_unique
 
 CREATE UNIQUE INDEX IF NOT EXISTS repair_outcomes_request_unique
   ON repair_outcomes(remediation_request_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS approval_one_pending_report_release
+  ON approval_requests(report_id, action_type)
+  WHERE status = 'PENDING' AND action_type = 'REPORT_RELEASE';

@@ -16,6 +16,8 @@ function mapOnboarding(row) {
         workspaceId: row.workspace_id,
         status: row.status,
         completedSteps: row.completed_steps || [],
+        finalizationAttempts: Number(row.finalization_attempts || 0),
+        lastErrorCode: row.last_error_code || null,
         primaryTargetId: row.primary_target_id,
         firstHttpJobId: row.first_http_job_id,
         firstBrowserJobId: row.first_browser_job_id,
@@ -472,27 +474,73 @@ export async function setOnboardingAssessmentJobs({
   });
 }
 
-export async function listOnboardingReadyForReport(limit = 25) {
+export async function claimOnboardingReadyForReport(limit = 25) {
   const safeLimit = Math.min(Math.max(Number(limit) || 25, 1), 100);
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await client.query(
+      `WITH candidates AS (
+         SELECT o.workspace_id
+           FROM workspace_onboarding o
+          WHERE o.status = 'IN_PROGRESS'
+            AND o.primary_target_id IS NOT NULL
+            AND o.first_report_id IS NULL
+            AND (o.first_http_job_id IS NOT NULL OR o.first_browser_job_id IS NOT NULL)
+            AND NOT EXISTS (
+              SELECT 1
+                FROM jobs j
+               WHERE j.id IN (o.first_http_job_id, o.first_browser_job_id)
+                 AND j.state IN ('QUEUED','RUNNING')
+            )
+          ORDER BY o.updated_at
+          FOR UPDATE OF o SKIP LOCKED
+          LIMIT $1
+       )
+       UPDATE workspace_onboarding o
+          SET status = 'FINALIZING',
+              finalization_attempts = finalization_attempts + 1,
+              last_error_code = NULL,
+              updated_at = now()
+         FROM candidates
+        WHERE o.workspace_id = candidates.workspace_id
+       RETURNING o.workspace_id, o.primary_target_id,
+                 o.first_http_job_id, o.first_browser_job_id,
+                 o.finalization_attempts`,
+      [safeLimit],
+    );
+    await client.query("COMMIT");
+    return result.rows;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function failOnboardingFinalization({
+  workspaceId,
+  errorCode,
+}) {
   const result = await pool.query(
-    `SELECT o.workspace_id, o.primary_target_id,
-            o.first_http_job_id, o.first_browser_job_id
-       FROM workspace_onboarding o
-      WHERE o.status = 'IN_PROGRESS'
-        AND o.primary_target_id IS NOT NULL
-        AND o.first_report_id IS NULL
-        AND (o.first_http_job_id IS NOT NULL OR o.first_browser_job_id IS NOT NULL)
-        AND NOT EXISTS (
-          SELECT 1
-            FROM jobs j
-           WHERE j.id IN (o.first_http_job_id, o.first_browser_job_id)
-             AND j.state IN ('QUEUED','RUNNING')
-        )
-      ORDER BY o.updated_at
-      LIMIT $1`,
-    [safeLimit],
+    `UPDATE workspace_onboarding
+        SET status = CASE
+              WHEN finalization_attempts >= 3 THEN 'BLOCKED'
+              ELSE 'IN_PROGRESS'
+            END,
+            blocked_reason = CASE
+              WHEN finalization_attempts >= 3 THEN $2
+              ELSE NULL
+            END,
+            last_error_code = $2,
+            updated_at = now()
+      WHERE workspace_id = $1
+        AND status = 'FINALIZING'
+      RETURNING *`,
+    [workspaceId, String(errorCode || "FINALIZATION_FAILED").slice(0, 120)],
   );
-  return result.rows;
+  return mapOnboarding(result.rows[0]);
 }
 
 export async function setOnboardingReport({

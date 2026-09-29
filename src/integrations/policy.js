@@ -44,10 +44,13 @@ export async function validateIntegrationConfig(
     const token = requiredString(input.token, "token", 1000);
     const owner = requiredString(input.owner, "owner", 100);
     const repo = requiredString(input.repo, "repo", 100);
+    const webhookSecret = input.webhookSecret
+      ? requiredString(input.webhookSecret, "webhookSecret", 1000)
+      : null;
     if (!/^[A-Za-z0-9_.-]+$/.test(owner) || !/^[A-Za-z0-9_.-]+$/.test(repo)) {
       invalid("GitHub owner/repo is invalid");
     }
-    return { token, owner, repo };
+    return { token, owner, repo, webhookSecret };
   }
 
   if (provider === "SLACK") {
@@ -108,7 +111,12 @@ export function validateSubscribedEvents(events) {
 
 export function publicIntegrationConfig(provider, config) {
   if (provider === "GITHUB") {
-    return { owner: config.owner, repo: config.repo, tokenConfigured: true };
+    return {
+      owner: config.owner,
+      repo: config.repo,
+      tokenConfigured: true,
+      webhookSecretConfigured: Boolean(config.webhookSecret),
+    };
   }
   if (provider === "SLACK") return { webhookConfigured: true };
   if (provider === "STRIPE") return { webhookSecretConfigured: true };

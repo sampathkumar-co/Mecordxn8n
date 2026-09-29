@@ -31,6 +31,7 @@ jobs:
 
     env:
       DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/mecordxn8n_test
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
 
     steps:
       - uses: actions/checkout@v4
@@ -44,3 +45,15 @@ jobs:
       - run: npm run migrate
 
       - run: npm run check
+
+      - name: Validate Docker Compose
+        run: docker compose --env-file .env.example config >/dev/null
+
+  browser-image:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Browser QA image
+        run: docker build --pull -f Dockerfile.browser -t mecordxn8n-browser:ci .

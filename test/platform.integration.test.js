@@ -105,6 +105,26 @@ test(
       assert.equal(response.headers.get("x-content-type-options"), "nosniff");
       const html = await response.text();
       assert.match(html, /Mecordxn8n Control Center/);
+      assert.match(html, /\/console\/styles\/v2\.css/);
+
+      const deepLink = await fetch(
+        `${baseUrl}/console/findings/00000000-0000-4000-8000-000000000001`,
+      );
+      assert.equal(deepLink.status, 200);
+      assert.match(await deepLink.text(), /Mecordxn8n Control Center/);
+
+      const moduleResponse = await fetch(`${baseUrl}/console/core/router.js`);
+      assert.equal(moduleResponse.status, 200);
+      assert.match(
+        moduleResponse.headers.get("content-type") || "",
+        /text\/javascript/,
+      );
+      assert.match(await moduleResponse.text(), /parseConsoleRoute/);
+
+      const traversal = await fetch(
+        `${baseUrl}/console/core/%2e%2e/%2e%2e/package.json`,
+      );
+      assert.equal(traversal.status, 404);
     });
 
     await t.test("owner bootstrap is one-time and login is opaque", async () => {

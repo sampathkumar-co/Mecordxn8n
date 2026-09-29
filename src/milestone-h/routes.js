@@ -13,6 +13,7 @@ import {
   listOpportunityFindings,
   saveReport,
 } from "../milestone-a/repository.js";
+import { createApprovalRequest } from "../milestone-b/repository.js";
 import { buildClientProposal } from "../milestone-a/report.js";
 import {
   registerSelfServeOwner,
@@ -42,6 +43,7 @@ import {
   listTargetAuthorizationCenter,
   markOnboardingStep,
   recordBillingCheckout,
+  reportBelongsToWorkspace,
   replaceTargetAuthorization,
   revokeReportShareLink,
   revokeTargetAuthorization,
@@ -461,6 +463,40 @@ export async function handleMilestoneHPlatformRoute({
       browserJobId: jobs.browser?.id || null,
     });
     return json(res, 202, { queued: true, jobs });
+  }
+
+  match = url.pathname.match(
+    /^\/v1\/platform\/workspaces\/([0-9a-f-]+)\/reports\/([0-9a-f-]+)\/request-release$/i,
+  );
+  if (req.method === "POST" && match) {
+    await requireWorkspace(principal, match[1], {
+      minimumRole: "ADMIN",
+      apiScope: "approvals:write",
+    });
+    const report = await reportBelongsToWorkspace({
+      workspaceId: match[1],
+      reportId: match[2],
+    });
+    if (!report) return json(res, 404, { error: "REPORT_NOT_FOUND" });
+    if (report.status === "APPROVED") {
+      return json(res, 200, { alreadyApproved: true, report });
+    }
+    try {
+      const approval = await createApprovalRequest({
+        targetId: report.target_id,
+        reportId: report.id,
+        actionType: "REPORT_RELEASE",
+        payload: { reportId: report.id },
+        requestedBy: principal.user?.email || "api-key",
+        expiresMinutes: 120,
+      });
+      return json(res, 202, { approvalRequired: true, approval });
+    } catch (error) {
+      if (error.code === "23505") {
+        return json(res, 409, { error: "APPROVAL_ALREADY_PENDING" });
+      }
+      throw error;
+    }
   }
 
   match = url.pathname.match(

@@ -5,6 +5,11 @@ import net from "node:net";
 import { createHash } from "node:crypto";
 
 import { CAPABILITIES } from "../authorization.js";
+import {
+  completeJob,
+  leaseJob,
+  recordFinding,
+} from "./control-client.js";
 
 const DEFAULT_USER_AGENT = "Mecordxn8n-Public-QA/0.1";
 
@@ -170,35 +175,15 @@ export function findingForObservation(observation) {
   };
 }
 
-async function apiRequest(baseUrl, workerToken, path, body) {
-  const response = await fetch(`${baseUrl}${path}`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${workerToken}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (response.status === 204) return null;
-
-  const payload = await response.json();
-  if (!response.ok) {
-    const error = new Error(`control API returned ${response.status}`);
-    error.code = payload.error || "CONTROL_API_ERROR";
-    error.payload = payload;
-    throw error;
-  }
-  return payload;
-}
-
 export async function runPublicHttpObserverOnce({
   controlApiUrl,
   workerToken,
   workerId = "public-http-observer",
   observe = observePublicHttpUrl,
 }) {
-  const job = await apiRequest(controlApiUrl, workerToken, "/v1/worker/jobs/lease", {
+  const job = await leaseJob({
+    controlApiUrl,
+    workerToken,
     workerId,
     capabilities: [CAPABILITIES.PUBLIC_HTTP_OBSERVE],
     leaseSeconds: 60,
@@ -211,27 +196,26 @@ export async function runPublicHttpObserverOnce({
     const finding = findingForObservation(observation);
 
     if (finding) {
-      await apiRequest(
+      await recordFinding({
         controlApiUrl,
         workerToken,
-        `/v1/worker/jobs/${job.id}/findings`,
-        { workerId, finding },
-      );
+        workerId,
+        jobId: job.id,
+        finding,
+      });
     }
 
-    const completed = await apiRequest(
+    const completed = await completeJob({
       controlApiUrl,
       workerToken,
-      `/v1/worker/jobs/${job.id}/complete`,
-      {
-        workerId,
-        state: "SUCCEEDED",
-        output: {
-          observation,
-          findingRecorded: Boolean(finding),
-        },
+      workerId,
+      jobId: job.id,
+      state: "SUCCEEDED",
+      output: {
+        observation,
+        findingRecorded: Boolean(finding),
       },
-    );
+    });
 
     return {
       state: "PROCESSED",
@@ -240,19 +224,17 @@ export async function runPublicHttpObserverOnce({
     };
   } catch (error) {
     try {
-      await apiRequest(
+      await completeJob({
         controlApiUrl,
         workerToken,
-        `/v1/worker/jobs/${job.id}/complete`,
-        {
-          workerId,
-          state: "FAILED",
-          error: {
-            code: error.code || "OBSERVATION_FAILED",
-            message: error.message,
-          },
+        workerId,
+        jobId: job.id,
+        state: "FAILED",
+        error: {
+          code: error.code || "OBSERVATION_FAILED",
+          message: error.message,
         },
-      );
+      });
     } catch {
       // A lost/expired lease must not be force-completed by this worker.
     }

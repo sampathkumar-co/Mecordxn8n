@@ -1,5 +1,6 @@
 import {
   CAPABILITIES,
+  AuthorizationError,
   assertAuthorized,
 } from "../authorization.js";
 import {
@@ -27,6 +28,15 @@ function validId(value) {
   return UUID_RE.test(String(value || ""));
 }
 
+function authorize(args) {
+  try {
+    return assertAuthorized(args);
+  } catch (error) {
+    if (error instanceof AuthorizationError) error.statusCode = 403;
+    throw error;
+  }
+}
+
 async function queueTargetJob({
   targetId,
   requestedUrl,
@@ -42,7 +52,7 @@ async function queueTargetJob({
   }
 
   const authorization = await getCurrentAuthorization(targetId);
-  const decision = assertAuthorized({
+  const decision = authorize({
     authorization,
     requestedCapability: capability,
     requestedUrl,
@@ -198,7 +208,7 @@ export async function handleMilestoneARoute({
     const finding = await getFindingContext(match[1]);
     if (!finding) return json(res, 404, { error: "FINDING_NOT_FOUND" });
     const authorization = await getCurrentAuthorization(finding.targetId);
-    const decision = assertAuthorized({
+    const decision = authorize({
       authorization,
       requestedCapability: CAPABILITIES.FINDING_VERIFY,
       requestedUrl: finding.affectedUrl,
@@ -229,7 +239,7 @@ export async function handleMilestoneARoute({
     }
 
     const authorization = await getCurrentAuthorization(finding.targetId);
-    const decision = assertAuthorized({
+    const decision = authorize({
       authorization,
       requestedCapability: CAPABILITIES.SOURCE_REMEDIATION,
       requestedUrl: finding.affectedUrl,

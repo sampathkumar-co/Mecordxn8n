@@ -385,6 +385,18 @@ export async function handleMilestoneCRoute({
       badRequest,
       { required: true },
     );
+    if (
+      channel === "EMAIL" &&
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(destination)
+    ) {
+      throw badRequest("email destination is invalid");
+    }
+    if (
+      ["PHONE", "WHATSAPP"].includes(channel) &&
+      !/^\+?[0-9][0-9 .()-]{5,30}$/.test(destination)
+    ) {
+      throw badRequest("phone destination is invalid");
+    }
     const consentState =
       body.consentState == null
         ? "UNKNOWN"
@@ -722,17 +734,23 @@ export async function handleMilestoneCRoute({
     if (!kind) throw badRequest("revenue kind is invalid");
     const currency = normalizeCurrency(body.currency);
     if (!currency) throw badRequest("currency must be a 3-letter code");
+    const externalReference = boundedString(
+      body.externalReference,
+      240,
+      "externalReference",
+      badRequest,
+    );
+    if (["RECEIVED", "REFUNDED"].includes(kind) && !externalReference) {
+      throw badRequest(
+        "externalReference is required for received or refunded revenue",
+      );
+    }
     const result = await recordRevenueEvent({
       opportunityId: match[1],
       kind,
       amountMinor: parseMinor(body.amountMinor, "amountMinor", badRequest),
       currency,
-      externalReference: boundedString(
-        body.externalReference,
-        240,
-        "externalReference",
-        badRequest,
-      ),
+      externalReference,
       occurredAt: parseDate(body.occurredAt, "occurredAt", badRequest),
     });
     if (!result) {

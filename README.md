@@ -122,6 +122,55 @@ including:
 - last-24-hour operational errors,
 - today's job count and cost units.
 
+## Milestone C — consent-safe revenue operations
+
+Milestone C closes the commercial lifecycle without turning the product into an autonomous cold-outreach system.
+
+The supported lifecycle is:
+
+```text
+VERIFIED finding
+      ↓
+commercial opportunity
+      ↓
+released client report
+      ↓
+known contact + affirmative consent/client relationship
+      ↓
+draft outbound action
+      ↓
+human approval
+      ↓
+re-check consent + release + cooldown + daily cap
+      ↓
+APPROVED manual/provider handoff
+      ↓
+delivery/response recorded
+      ↓
+contract/invoice/payment evidence
+      ↓
+revenue attribution
+      ↓
+optional recurring service + renewal tracking
+```
+
+Key controls:
+
+- commercial opportunities are anchored to verified findings and are deduplicated per target/finding;
+- `WON` cannot be set manually and is reached only after a recorded `RECEIVED` revenue event;
+- external reports must already be `APPROVED` before they can be referenced by an outbound action;
+- contacts require explicit `OPTED_IN` or `CLIENT_RELATIONSHIP` state, evidence, and non-expired consent before activation;
+- opt-out / do-not-contact state immediately suppresses future pending or approved actions;
+- every outbound action is a draft until an explicit `OUTBOUND_CONTACT` approval is granted;
+- approval alone is not permission forever: consent, report release, cooldown, and daily activation cap are re-checked at activation time;
+- delivery is **recorded**, not automatically executed by this repository. No provider-specific cold-send worker is included;
+- payment/refund records use minor currency units, currency consistency, and idempotency references;
+- received/refunded revenue requires a traceable external reference;
+- recurring services can be paused/cancelled/ended and surface upcoming renewals;
+- commercial maintenance only returns due follow-ups, renewals, and approved manual actions. It does not send messages.
+
+Commercial state is available through the `/v1/commercial-*`, `/v1/outbound-actions/*`, `/v1/revenue/metrics`, and `/v1/services/*` APIs.
+
 ## n8n workflows
 
 Workflow JSON under `n8n/workflows/` includes:

@@ -180,8 +180,8 @@ export async function handleMilestoneHPublicRoute({
       });
       return json(res, 201, result);
     } catch (error) {
-      if (error.code === "23505") {
-        return json(res, 409, { error: "ACCOUNT_OR_WORKSPACE_EXISTS" });
+      if (error.code === "23505" || error.code === "ACCOUNT_EXISTS") {
+        return json(res, 409, { error: "SIGNUP_CONFLICT" });
       }
       throw error;
     }

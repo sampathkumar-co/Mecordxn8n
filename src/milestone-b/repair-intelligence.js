@@ -4,30 +4,41 @@ function hash(value) {
   return createHash("sha256").update(String(value)).digest("hex");
 }
 
+function symptomMaterial(finding) {
+  return String(
+    finding.evidence?.message ||
+      finding.evidence?.errorText ||
+      finding.title ||
+      finding.fingerprint,
+  ).slice(0, 1000);
+}
+
+function resultShape(result) {
+  if (result == null) return { type: "null", keys: [] };
+  if (Array.isArray(result)) return { type: "array", keys: [] };
+  if (typeof result !== "object") return { type: typeof result, keys: [] };
+  return {
+    type: "object",
+    keys: Object.keys(result).sort().slice(0, 30),
+  };
+}
+
 export function repairPatternKey(finding) {
   const root = finding.rootCauseKey || finding.category || "unknown";
-  const signature =
-    finding.evidence?.message ||
-    finding.evidence?.errorText ||
-    finding.title ||
-    finding.fingerprint;
-  return hash(`${root}|${String(signature).slice(0, 500)}`);
+  return hash(`${root}|${symptomMaterial(finding)}`);
 }
 
 export function extractRepairLearning({ finding, remediationResult, outcome }) {
-  const result = remediationResult || {};
-  const serialized = JSON.stringify(result).slice(0, 4000);
+  const shape = resultShape(remediationResult);
+  const patternKey = repairPatternKey(finding);
 
   return {
-    patternKey: repairPatternKey(finding),
+    patternKey,
     category: finding.category,
     rootCauseKey: finding.rootCauseKey || null,
-    symptomSignature: String(
-      finding.evidence?.message ||
-        finding.evidence?.errorText ||
-        finding.title ||
-        finding.fingerprint,
-    ).slice(0, 1000),
+    // Store only a non-reversible signature. Raw client errors, paths and
+    // MCP output must not become cross-client repair memory.
+    symptomSignature: `sha256:${hash(symptomMaterial(finding))}`,
     outcome,
     summary:
       outcome === "SUCCESS"
@@ -37,14 +48,20 @@ export function extractRepairLearning({ finding, remediationResult, outcome }) {
           : "Authorized remediation did not complete successfully.",
     successfulStrategy:
       outcome === "SUCCESS"
-        ? { mcpResult: serialized }
+        ? {
+            source: "verified-remediation",
+            resultType: shape.type,
+            resultShape: shape.keys,
+          }
         : {},
     validationStrategy: {
-      verifiedFindingId: finding.id,
       verificationStatus: finding.verification?.status || null,
+      evidenceBacked: Boolean(finding.verification?.evidence),
     },
     lessons: {
-      resultPreview: serialized,
+      resultType: shape.type,
+      resultShape: shape.keys,
+      rawClientDataStored: false,
     },
   };
 }

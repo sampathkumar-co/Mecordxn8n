@@ -16,17 +16,17 @@ import {
   getTarget,
 } from "../milestone-a/repository.js";
 import {
+  cancelInvalidAuthorizationJobs,
+  claimDueMonitoringPolicies,
   createApprovalRequest,
   createMonitoringPolicy,
   decideApprovalRequest,
   expirePendingApprovals,
   getApprovalRequest,
   getOperationalMetrics,
-  listDueMonitoringPolicies,
   listMonitoringPolicies,
   listOpenRegressions,
   lookupRepairPatterns,
-  markMonitoringPolicyQueued,
   recordMonitoringFailure,
   recordMonitoringRunFromLease,
   getActiveLease,
@@ -351,7 +351,8 @@ export async function handleMilestoneBRoute({
     const body = await readJson(req);
     await expirePendingApprovals();
     const deadLettered = await sweepExhaustedJobs();
-    const due = await listDueMonitoringPolicies(body.limit || 25);
+    const cancelledForAuthorization = await cancelInvalidAuthorizationJobs();
+    const due = await claimDueMonitoringPolicies(body.limit || 25);
     const queued = [];
     const skipped = [];
 
@@ -370,7 +371,6 @@ export async function handleMilestoneBRoute({
             dailyBudgetUnits: policy.dailyBudgetUnits,
           },
         });
-        await markMonitoringPolicyQueued(policy.id);
         continue;
       }
 
@@ -394,7 +394,6 @@ export async function handleMilestoneBRoute({
           decision,
           maxAttempts: 3,
         });
-        await markMonitoringPolicyQueued(policy.id);
         queued.push({ policyId: policy.id, jobId: job.id });
       } catch (error) {
         skipped.push({ policyId: policy.id, reason: error.code || "AUTHORIZATION_FAILED" });
@@ -405,11 +404,15 @@ export async function handleMilestoneBRoute({
           targetId: policy.targetId,
           payload: { policyId: policy.id, error: error.message },
         });
-        await markMonitoringPolicyQueued(policy.id);
       }
     }
 
-    return json(res, 200, { queued, skipped, deadLettered });
+    return json(res, 200, {
+      queued,
+      skipped,
+      deadLettered,
+      cancelledForAuthorization,
+    });
   }
 
   match = url.pathname.match(/^\/v1\/targets\/([0-9a-f-]+)\/regressions$/i);

@@ -368,9 +368,10 @@ A separate platform-operator view provides fleet-level workspace/subscription co
 The repository includes:
 
 - `docker-compose.production.yml` — production overlay;
-- `deploy/Caddyfile` — automatic TLS and reverse proxy for the app and n8n;
-- `npm run production:preflight` — rejects missing/placeholder/short production secrets and invalid domain configuration;
-- `npm run production:smoke` — verifies public liveness, database readiness and the Control Center after deployment.
+- `deploy/Caddyfile` — automatic TLS and an explicit public-route allowlist for the customer app;
+- n8n remains private by default on the host/Compose network and is not published through Caddy;
+- `npm run production:preflight` — rejects missing/placeholder/short production secrets and invalid HTTPS/domain configuration;
+- `npm run production:smoke` — verifies TLS/security headers, public liveness, the Control Center, and that internal worker/maintenance/readiness routes are not exposed.
 
 Typical production validation:
 
@@ -382,3 +383,20 @@ npm run production:smoke
 ```
 
 Production deployment still requires operator-provided DNS, reachable infrastructure, strong secrets, database credentials, backup storage, and any selected Stripe/Mecord/provider credentials. Repository certification does not claim those external systems have been provisioned.
+
+
+### Post-H hardening
+
+After Milestone H, the production boundary was tightened further:
+
+- CI and production images use deterministic `npm ci` installs from the committed lockfile;
+- both built production images are scanned for HIGH/CRITICAL vulnerabilities;
+- production Caddy exposes only `/console`, `/livez`, customer `/v1/platform/*` routes, and signed integration webhook ingress;
+- `/healthz`, worker APIs, maintenance APIs, legacy orchestrator routes, and n8n stay private;
+- production smoke checks require HTTPS and verify the internal-route boundary;
+- login performs equivalent password-hash work for unknown accounts to reduce account-existence timing leakage;
+- the HTTP server uses bounded request/header/keep-alive settings;
+- upgrade-time platform-operator identity is reconciled to the auditable `PLATFORM_BOOTSTRAPPED` event rather than ordinary workspace ownership;
+- the Control Center uses bounded request timeouts, safe GET-only transient retry, and explicit degraded/offline/retry states.
+
+The planned Control Center redesign is documented in `docs/UI_UX_V2_PLAN.md`.

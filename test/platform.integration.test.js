@@ -445,6 +445,94 @@ test(
       );
       assert.equal(crossWorkspaceDetail.status, 404);
 
+      const findingFixture = await pool.query(
+        `INSERT INTO findings (
+           target_id, first_job_id, last_job_id, fingerprint, category,
+           title, severity, confidence, affected_url, evidence, status
+         )
+         VALUES (
+           $1,$2,$2,'platform-repair-fixture','RUNTIME',
+           'Repair fixture','HIGH',0.9,$3,$4::jsonb,'VERIFIED'
+         )
+         RETURNING id`,
+        [
+          targetA.id,
+          job.body.id,
+          targetA.baseUrl,
+          JSON.stringify({ safe: "finding evidence" }),
+        ],
+      );
+      const remediationFixture = await pool.query(
+        `INSERT INTO remediation_requests (
+           target_id, finding_id, job_id, project_root, status,
+           mcp_request_id, mcp_result, completed_at
+         )
+         VALUES (
+           $1,$2,$3,'C:\\PRIVATE\\CUSTOMER_REPO','FAILED',
+           gen_random_uuid(),$4::jsonb,now()
+         )
+         RETURNING id`,
+        [
+          targetA.id,
+          findingFixture.rows[0].id,
+          job.body.id,
+          JSON.stringify({
+            secret: "MCP-RESULT-SECRET",
+            sourcePath: "C:\\PRIVATE\\CUSTOMER_REPO\\src",
+          }),
+        ],
+      );
+      await pool.query(
+        `INSERT INTO repair_outcomes (
+           remediation_request_id, finding_id, pattern_key,
+           outcome, summary, lessons
+         )
+         VALUES ($1,$2,'fixture-pattern','FAILED',$3,$4::jsonb)`,
+        [
+          remediationFixture.rows[0].id,
+          findingFixture.rows[0].id,
+          "Safe repair outcome summary",
+          JSON.stringify({ hiddenSentinel: "REPAIR-LESSONS-SECRET" }),
+        ],
+      );
+
+      const repairs = await request(
+        `/v1/platform/workspaces/${workspaceA.id}/repairs`,
+        { token: ownerToken },
+      );
+      assert.equal(repairs.status, 200);
+      assert.equal(
+        repairs.body.repairs.some(
+          (item) => item.id === remediationFixture.rows[0].id,
+        ),
+        true,
+      );
+      assert.doesNotMatch(
+        JSON.stringify(repairs.body),
+        /PRIVATE|CUSTOMER_REPO|MCP-RESULT-SECRET|REPAIR-LESSONS-SECRET/,
+      );
+
+      const repairDetail = await request(
+        `/v1/platform/workspaces/${workspaceA.id}/repairs/${remediationFixture.rows[0].id}`,
+        { token: ownerToken },
+      );
+      assert.equal(repairDetail.status, 200);
+      assert.equal(repairDetail.body.outcome.status, "FAILED");
+      assert.equal(
+        repairDetail.body.outcome.summary,
+        "Safe repair outcome summary",
+      );
+      assert.doesNotMatch(
+        JSON.stringify(repairDetail.body),
+        /PRIVATE|CUSTOMER_REPO|MCP-RESULT-SECRET|REPAIR-LESSONS-SECRET/,
+      );
+
+      const crossWorkspaceRepair = await request(
+        `/v1/platform/workspaces/${workspaceB.id}/repairs/${remediationFixture.rows[0].id}`,
+        { token: ownerToken },
+      );
+      assert.equal(crossWorkspaceRepair.status, 404);
+
       const after = await request(
         `/v1/platform/workspaces/${workspaceA.id}/subscription`,
         { token: ownerToken },

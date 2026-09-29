@@ -655,28 +655,63 @@ export async function consumePlatformRateLimit(principal) {
 export async function getWorkspaceAccess(principal, workspaceId) {
   if (principal.kind === "API_KEY") {
     if (principal.workspaceId !== workspaceId) return null;
+    const workspace = await pool.query(
+      `SELECT w.status, w.plan,
+              COALESCE(s.status,'ACTIVE') AS subscription_status,
+              s.trial_ends_at
+         FROM workspaces w
+         LEFT JOIN workspace_subscriptions s ON s.workspace_id = w.id
+        WHERE w.id = $1
+          AND w.status = 'ACTIVE'`,
+      [workspaceId],
+    );
+    if (workspace.rowCount === 0) return null;
+    const row = workspace.rows[0];
+    const subscriptionUsable =
+      row.subscription_status === "ACTIVE" ||
+      (
+        row.subscription_status === "TRIALING" &&
+        (!row.trial_ends_at || new Date(row.trial_ends_at).getTime() > Date.now())
+      );
     return {
       workspaceId,
       role: "API_KEY",
       scopes: principal.scopes || [],
+      plan: row.plan,
+      subscriptionStatus: row.subscription_status,
+      trialEndsAt: row.trial_ends_at,
+      subscriptionUsable,
     };
   }
 
   const result = await pool.query(
-    `SELECT m.workspace_id, m.role, w.status, w.plan
+    `SELECT m.workspace_id, m.role, w.status, w.plan,
+            COALESCE(s.status,'ACTIVE') AS subscription_status,
+            s.trial_ends_at
        FROM workspace_memberships m
        JOIN workspaces w ON w.id = m.workspace_id
+       LEFT JOIN workspace_subscriptions s ON s.workspace_id = w.id
       WHERE m.workspace_id = $1
         AND m.user_id = $2
         AND w.status = 'ACTIVE'`,
     [workspaceId, principal.userId],
   );
   if (result.rowCount === 0) return null;
+  const row = result.rows[0];
+  const subscriptionUsable =
+    row.subscription_status === "ACTIVE" ||
+    (
+      row.subscription_status === "TRIALING" &&
+      (!row.trial_ends_at || new Date(row.trial_ends_at).getTime() > Date.now())
+    );
   return {
     workspaceId,
-    role: result.rows[0].role,
+    role: row.role,
     scopes: [],
-    plan: result.rows[0].plan,
+    plan: row.plan,
+    subscriptionStatus: row.subscription_status,
+    trialEndsAt: row.trial_ends_at,
+    subscriptionUsable,
   };
 }
 
@@ -692,6 +727,14 @@ export function accessAllows(access, {
   apiScope = "workspace:read",
 } = {}) {
   if (!access) return false;
+  const operationalWrite = [
+    "targets:write",
+    "approvals:write",
+    "integrations:write",
+  ].includes(apiScope);
+  if (operationalWrite && access.subscriptionUsable === false) {
+    return false;
+  }
   if (access.role === "API_KEY") {
     return access.scopes.includes("*") || access.scopes.includes(apiScope);
   }

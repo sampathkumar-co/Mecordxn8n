@@ -3,6 +3,7 @@ import fs from "node:fs";
 const requiredFiles = [
   "db/migrations/009_release_integrations.sql",
   "db/migrations/010_milestone_h_launch.sql",
+  "db/migrations/011_post_h_hardening.sql",
   "src/platform/routes.js",
   "src/integrations/routes.js",
   "src/integrations/repository.js",
@@ -25,6 +26,7 @@ const requiredFiles = [
   "deploy/Caddyfile",
   "scripts/production-preflight.mjs",
   "scripts/production-smoke.mjs",
+  "docs/UI_UX_V2_PLAN.md",
 ];
 
 const missingFiles = requiredFiles.filter((file) => !fs.existsSync(file));

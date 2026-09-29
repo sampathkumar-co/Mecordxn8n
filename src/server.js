@@ -302,7 +302,7 @@ export function createServer({
     throw new Error("WORKER_TOKEN is required");
   }
 
-  return http.createServer(async (req, res) => {
+  const server = http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url, "http://localhost");
 
@@ -554,6 +554,12 @@ export function createServer({
       });
     }
   });
+
+  server.requestTimeout = 30_000;
+  server.headersTimeout = 15_000;
+  server.keepAliveTimeout = 5_000;
+  server.maxRequestsPerSocket = 1_000;
+  return server;
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

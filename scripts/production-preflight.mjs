@@ -10,7 +10,6 @@ const required = [
   "PLATFORM_MASTER_KEY",
   "BOOTSTRAP_TOKEN",
   "APP_DOMAIN",
-  "N8N_DOMAIN",
   "ACME_EMAIL",
   "PUBLIC_APP_URL",
 ];
@@ -50,17 +49,10 @@ if (values.PUBLIC_APP_URL) {
   }
 }
 
-for (const name of ["APP_DOMAIN", "N8N_DOMAIN"]) {
+for (const name of ["APP_DOMAIN"]) {
   if (values[name] && !/^[a-z0-9.-]+$/i.test(values[name])) {
     errors.push(name + " must be a hostname");
   }
-}
-if (
-  values.APP_DOMAIN &&
-  values.N8N_DOMAIN &&
-  values.APP_DOMAIN === values.N8N_DOMAIN
-) {
-  errors.push("APP_DOMAIN and N8N_DOMAIN must differ");
 }
 
 if (process.env.STRIPE_SECRET_KEY) {
@@ -83,6 +75,5 @@ if (errors.length) {
 console.log(JSON.stringify({
   ok: true,
   appDomain: values.APP_DOMAIN,
-  n8nDomain: values.N8N_DOMAIN,
   stripeBillingConfigured: Boolean(process.env.STRIPE_SECRET_KEY),
 }));

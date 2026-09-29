@@ -10,10 +10,32 @@
     X-Content-Type-Options "nosniff"
     Referrer-Policy "no-referrer"
   }
-  reverse_proxy control-api:8080
-}
 
-{$N8N_DOMAIN} {
-  encode zstd gzip
-  reverse_proxy n8n:5678
+  handle / {
+    redir /console 302
+  }
+
+  handle /livez {
+    reverse_proxy control-api:8080
+  }
+
+  handle /console {
+    reverse_proxy control-api:8080
+  }
+
+  handle /console/* {
+    reverse_proxy control-api:8080
+  }
+
+  handle /v1/platform/* {
+    reverse_proxy control-api:8080
+  }
+
+  handle /v1/integrations/webhooks/* {
+    reverse_proxy control-api:8080
+  }
+
+  handle {
+    respond 404
+  }
 }

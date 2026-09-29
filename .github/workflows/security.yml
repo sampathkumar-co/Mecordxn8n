@@ -32,13 +32,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build control image
-        run: docker build -t mecordxn8n-control:security .
-      - name: Trivy filesystem scan
+      - name: Build production images
+        run: |
+          docker build --pull -t mecordxn8n-control:security .
+          docker build --pull -f Dockerfile.browser -t mecordxn8n-browser:security .
+      - name: Scan control image
         uses: aquasecurity/trivy-action@v0.36.0
         with:
-          scan-type: fs
-          scan-ref: .
+          scan-type: image
+          image-ref: mecordxn8n-control:security
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Scan browser image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: image
+          image-ref: mecordxn8n-browser:security
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           exit-code: "1"

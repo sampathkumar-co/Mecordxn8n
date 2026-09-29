@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const roots = ["src", "scripts", "web", "n8n", "db", ".github"];
+const roots = ["src", "scripts", "web", "n8n", "db", ".github", "deploy"];
 const ignored = new Set(["package-lock.json"]);
 const patterns = [
   { name: "private-key", regex: /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/ },

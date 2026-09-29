@@ -387,7 +387,7 @@ test(
       assert.equal(write.status, 403);
     });
 
-    await t.test("operator job creation consumes workspace usage", async () => {
+    await t.test("operator job creation consumes usage and run detail stays sanitized", async () => {
       const before = await request(
         `/v1/platform/workspaces/${workspaceA.id}/subscription`,
         { token: ownerToken },
@@ -401,16 +401,49 @@ test(
             targetId: targetA.id,
             jobType: "platform-observe",
             capability: "PUBLIC_HTTP_OBSERVE",
-            requestedUrl: targetA.baseUrl,
-            input: {},
+            requestedUrl: `${targetA.baseUrl}?token=RUN-URL-SECRET#private`,
+            input: { sentinel: "RUN-INPUT-SECRET" },
           },
         },
       );
       assert.equal(job.status, 201);
       await pool.query(
-        "UPDATE jobs SET state = 'CANCELLED', completed_at = now() WHERE id = $1",
-        [job.body.id],
+        `UPDATE jobs
+            SET state = 'CANCELLED',
+                completed_at = now(),
+                output = $2::jsonb,
+                error = $3::jsonb
+          WHERE id = $1`,
+        [
+          job.body.id,
+          JSON.stringify({ sentinel: "RUN-OUTPUT-SECRET" }),
+          JSON.stringify({
+            code: "UPSTREAM_TIMEOUT",
+            message: "RUN-ERROR-SECRET",
+          }),
+        ],
       );
+
+      const detail = await request(
+        `/v1/platform/workspaces/${workspaceA.id}/jobs/${job.body.id}`,
+        { token: ownerToken },
+      );
+      assert.equal(detail.status, 200);
+      assert.equal(detail.body.id, job.body.id);
+      assert.equal(detail.body.errorCode, "UPSTREAM_TIMEOUT");
+      assert.equal(detail.body.state, "CANCELLED");
+      assert.equal(detail.body.requestedUrl.includes("?"), false);
+      assert.equal(detail.body.requestedUrl.includes("#"), false);
+      assert.doesNotMatch(
+        JSON.stringify(detail.body),
+        /RUN-(?:URL|INPUT|OUTPUT|ERROR)-SECRET/,
+      );
+
+      const crossWorkspaceDetail = await request(
+        `/v1/platform/workspaces/${workspaceB.id}/jobs/${job.body.id}`,
+        { token: ownerToken },
+      );
+      assert.equal(crossWorkspaceDetail.status, 404);
 
       const after = await request(
         `/v1/platform/workspaces/${workspaceA.id}/subscription`,

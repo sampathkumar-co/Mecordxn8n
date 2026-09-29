@@ -647,6 +647,7 @@ export async function runBrowserQaOnce({
         jobId: job.id,
         policyId: job.input.monitoringPolicyId,
         targetId: job.targetId,
+        workerId,
         error: {
           code: error.code || "BROWSER_QA_FAILED",
           message: compactText(error.message),

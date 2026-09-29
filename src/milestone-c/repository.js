@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { pool } from "../repository.js";
+import { enqueueTargetIntegrationEvent } from "../integrations/repository.js";
 import {
   canTransitionOpportunity,
   contactCanActivate,
@@ -1083,6 +1084,20 @@ export async function recordRevenueEvent({
       amountMinor,
       idempotent,
     });
+    if (kind === "RECEIVED" && inserted.rows[0] && !idempotent) {
+      await enqueueTargetIntegrationEvent({
+        client,
+        targetId: row.target_id,
+        eventType: "revenue.received",
+        payload: {
+          opportunityId,
+          revenueEventId: inserted.rows[0].id,
+          currency,
+          amountMinor,
+        },
+        idempotencyKey: `revenue.received:${inserted.rows[0].id}`,
+      });
+    }
     await client.query("COMMIT");
     return inserted.rows[0]
       ? { ...inserted.rows[0], idempotent }

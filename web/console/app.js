@@ -11,6 +11,8 @@ import { renderApprovalDetailView } from "/console/views/approval-detail.js";
 import { renderTargetDetailView } from "/console/views/target-detail.js";
 import { renderRunsView } from "/console/views/runs.js";
 import { renderRunDetailView } from "/console/views/run-detail.js";
+import { renderRepairsView } from "/console/views/repairs.js";
+import { renderRepairDetailView } from "/console/views/repair-detail.js";
 
 const state = {
   token: sessionStorage.getItem("mecord_session") || "",
@@ -227,6 +229,8 @@ const viewMeta = {
   findingDetail: ["ENGINEERING", "Finding", "Refresh"],
   approvals: ["HUMAN GATES", "Approval inbox", "Refresh"],
   approvalDetail: ["HUMAN GATES", "Approval review", "Refresh"],
+  repairs: ["REPAIR", "Repair lifecycle", "Refresh"],
+  repairDetail: ["REPAIR", "Repair detail", "Refresh"],
   pipeline: ["COMMERCIAL", "Pipeline", "Refresh"],
   operations: ["RUNTIME", "Runs & recovery", "Refresh"],
   runDetail: ["RUNTIME", "Run detail", "Refresh"],
@@ -247,6 +251,8 @@ const breadcrumbForView = {
   runDetail: "Workspace / Engineering / Runs / Detail",
   approvals: "Workspace / Repair / Approval inbox",
   approvalDetail: "Workspace / Repair / Approval review",
+  repairs: "Workspace / Repair / Repairs",
+  repairDetail: "Workspace / Repair / Repairs / Detail",
   pipeline: "Workspace / Revenue / Opportunities",
   integrations: "Workspace / Integrations",
   team: "Workspace / Team & Access",
@@ -268,7 +274,9 @@ async function render() {
         ? "targets"
         : state.view === "runDetail"
           ? "operations"
-          : state.view;
+          : state.view === "repairDetail"
+            ? "repairs"
+            : state.view;
   document.querySelectorAll(".nav-item").forEach((node) => {
     node.classList.toggle("active", node.dataset.view === activeView);
   });
@@ -283,6 +291,8 @@ async function render() {
       findingDetail: renderFindingDetail,
       approvals: renderApprovals,
       approvalDetail: renderApprovalDetail,
+      repairs: renderRepairs,
+      repairDetail: renderRepairDetail,
       pipeline: renderPipeline,
       operations: renderOperations,
       runDetail: renderRunDetail,
@@ -632,6 +642,31 @@ async function renderApprovalDetail() {
   });
 }
 
+async function renderRepairs() {
+  await renderRepairsView({
+    container: content,
+    api,
+    workspaceId: state.workspaceId,
+    fmtDate,
+    navigate: (path) => navigateConsole(path),
+  });
+}
+
+async function renderRepairDetail() {
+  if (!state.params.repairId) {
+    navigateConsole("/console/repairs", { replace: true });
+    return;
+  }
+  await renderRepairDetailView({
+    container: content,
+    api,
+    workspaceId: state.workspaceId,
+    repairId: state.params.repairId,
+    fmtDate,
+    navigate: (path) => navigateConsole(path),
+  });
+}
+
 async function renderPipeline() {
   const data = await api(`/v1/platform/workspaces/${state.workspaceId}/pipeline?limit=300`);
   const groups = {
@@ -897,6 +932,10 @@ $("#workspace-select").addEventListener("change",async(event)=>{
     navigateConsole("/console/runs");
     return;
   }
+  if (state.view === "repairDetail") {
+    navigateConsole("/console/repairs");
+    return;
+  }
   await render();
 });
 $("#nav").addEventListener("click",(event)=>{
@@ -912,6 +951,7 @@ const commands = [
   { label: "Targets", meta: "Authorized assets", route: "/console/targets" },
   { label: "Findings", meta: "Verified engineering evidence", route: "/console/findings" },
   { label: "Approval inbox", meta: "Human-gated decisions", route: "/console/approvals" },
+  { label: "Repairs", meta: "Verified proof to source repair", route: "/console/repairs" },
   { label: "Runs", meta: "Runtime and failure recovery", route: "/console/runs" },
   { label: "Opportunities", meta: "Repair to revenue", route: "/console/revenue" },
   { label: "Integrations", meta: "Provider connections", route: "/console/integrations" },

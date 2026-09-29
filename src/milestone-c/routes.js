@@ -164,6 +164,13 @@ export async function handleMilestoneCRoute({
     if (failure) return failure;
 
     if (result.status === "ALREADY_DECIDED") {
+      if (result.approval.status === "EXPIRED") {
+        await reconcileExpiredCommercialApprovals(10);
+        return json(res, 409, {
+          error: "APPROVAL_EXPIRED",
+          approval: result.approval,
+        });
+      }
       if (
         decision === "APPROVED" &&
         result.approval.status === "APPROVED"

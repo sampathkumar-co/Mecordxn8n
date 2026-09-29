@@ -28,6 +28,10 @@ import {
   runPlatformMaintenance,
 } from "./platform/routes.js";
 import { serveConsoleAsset } from "./platform/static.js";
+import {
+  handleIntegrationPlatformRoute,
+  handleIntegrationWebhookRoute,
+} from "./integrations/routes.js";
 
 const MAX_BODY_BYTES = 256 * 1024;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -60,6 +64,21 @@ function bearerToken(req) {
 
 function requireBearer(req, expectedToken) {
   return secureTokenEqual(bearerToken(req), expectedToken);
+}
+
+async function readRaw(req, maxBytes = MAX_BODY_BYTES) {
+  let size = 0;
+  const chunks = [];
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > maxBytes) {
+      const error = new Error("request body too large");
+      error.statusCode = 413;
+      throw error;
+    }
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
 }
 
 async function readJson(req) {
@@ -295,6 +314,17 @@ export function createServer({
         if (served) return;
       }
 
+      if (url.pathname.startsWith("/v1/integrations/webhooks/")) {
+        const handled = await handleIntegrationWebhookRoute({
+          req,
+          res,
+          url,
+          json,
+          readRaw,
+        });
+        if (handled !== false) return;
+      }
+
       if (url.pathname.startsWith("/v1/platform/")) {
         const rawBearer = bearerToken(req);
         const publicHandled = await handlePlatformPublicRoute({
@@ -313,6 +343,17 @@ export function createServer({
         if (!principal) {
           return json(res, 401, { error: "PLATFORM_UNAUTHORIZED" });
         }
+        const integrationHandled = await handleIntegrationPlatformRoute({
+          req,
+          res,
+          url,
+          json,
+          readJson,
+          badRequest,
+          principal,
+        });
+        if (integrationHandled !== false) return;
+
         const platformHandled = await handlePlatformRoute({
           req,
           res,

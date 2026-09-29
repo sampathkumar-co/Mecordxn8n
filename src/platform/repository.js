@@ -408,6 +408,77 @@ export async function listWorkspacePipeline(workspaceId, limit = 100) {
   }));
 }
 
+function sanitizeOperationalUrl(value) {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    url.username = "";
+    url.password = "";
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+export async function getWorkspaceJobSummary(workspaceId, jobId) {
+  const result = await pool.query(
+    `SELECT j.id, j.target_id, t.organization_name, t.base_url,
+            j.job_type, j.capability, j.requested_url, j.state,
+            j.attempt_count, j.max_attempts, j.next_attempt_at,
+            j.last_heartbeat_at, j.cost_units, j.created_at,
+            j.started_at, j.completed_at,
+            NULLIF(j.error->>'code','') AS error_code,
+            ca.id AS current_authorization_id,
+            ca.mode AS current_authorization_mode,
+            ca.allowed_capabilities AS current_allowed_capabilities,
+            ca.expires_at AS current_authorization_expires_at
+       FROM jobs j
+       JOIN targets t ON t.id = j.target_id
+       LEFT JOIN LATERAL (
+         SELECT a.id, a.mode, a.allowed_capabilities, a.expires_at
+           FROM authorizations a
+          WHERE a.target_id = j.target_id
+            AND a.revoked_at IS NULL
+          ORDER BY a.created_at DESC
+          LIMIT 1
+       ) ca ON true
+      WHERE j.id = $1
+        AND t.workspace_id = $2`,
+    [jobId, workspaceId],
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  return {
+    id: row.id,
+    targetId: row.target_id,
+    organizationName: row.organization_name,
+    targetBaseUrl: sanitizeOperationalUrl(row.base_url),
+    jobType: row.job_type,
+    capability: row.capability,
+    requestedUrl: sanitizeOperationalUrl(row.requested_url),
+    state: row.state,
+    attemptCount: row.attempt_count,
+    maxAttempts: row.max_attempts,
+    nextAttemptAt: row.next_attempt_at,
+    lastHeartbeatAt: row.last_heartbeat_at,
+    costUnits: Number(row.cost_units || 0),
+    createdAt: row.created_at,
+    startedAt: row.started_at,
+    completedAt: row.completed_at,
+    errorCode: row.error_code || null,
+    currentAuthorization: row.current_authorization_id
+      ? {
+          id: row.current_authorization_id,
+          mode: row.current_authorization_mode,
+          allowedCapabilities: row.current_allowed_capabilities || [],
+          expiresAt: row.current_authorization_expires_at,
+        }
+      : null,
+  };
+}
+
 export async function listWorkspaceOperations(workspaceId, limit = 100) {
   const [jobs, regressions, monitors] = await Promise.all([
     pool.query(

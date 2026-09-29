@@ -337,15 +337,22 @@ export async function handleMilestoneBRoute({
     const report = await getReport(match[1]);
     if (!report) return json(res, 404, { error: "REPORT_NOT_FOUND" });
     const body = await readJson(req);
-    const approval = await createApprovalRequest({
-      targetId: report.target_id,
-      reportId: report.id,
-      actionType: "REPORT_RELEASE",
-      payload: { reportId: report.id },
-      requestedBy: body.requestedBy || "chat",
-      expiresMinutes: body.expiresMinutes || 120,
-    });
-    return json(res, 202, { approvalRequired: true, approval });
+    try {
+      const approval = await createApprovalRequest({
+        targetId: report.target_id,
+        reportId: report.id,
+        actionType: "REPORT_RELEASE",
+        payload: { reportId: report.id },
+        requestedBy: body.requestedBy || "chat",
+        expiresMinutes: body.expiresMinutes || 120,
+      });
+      return json(res, 202, { approvalRequired: true, approval });
+    } catch (error) {
+      if (error.code === "23505") {
+        return json(res, 409, { error: "APPROVAL_ALREADY_PENDING" });
+      }
+      throw error;
+    }
   }
 
   match = url.pathname.match(/^\/v1\/targets\/([0-9a-f-]+)\/monitors$/i);
@@ -360,8 +367,12 @@ export async function handleMilestoneBRoute({
       throw badRequest("cadenceMinutes must be an integer from 5 to 10080");
     }
     const dailyBudgetUnits = Number(body.dailyBudgetUnits ?? 100);
-    if (!Number.isFinite(dailyBudgetUnits) || dailyBudgetUnits <= 0) {
-      throw badRequest("dailyBudgetUnits must be positive");
+    if (
+      !Number.isFinite(dailyBudgetUnits) ||
+      dailyBudgetUnits <= 0 ||
+      dailyBudgetUnits > 100000
+    ) {
+      throw badRequest("dailyBudgetUnits must be greater than 0 and at most 100000");
     }
 
     const target = await getTarget(match[1]);

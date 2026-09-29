@@ -6,6 +6,8 @@ import {
 } from "/console/core/router.js";
 import { renderFindingDetailView } from "/console/views/finding-detail.js";
 import { renderHomeView } from "/console/views/home.js";
+import { renderApprovalsView } from "/console/views/approvals.js";
+import { renderApprovalDetailView } from "/console/views/approval-detail.js";
 
 const state = {
   token: sessionStorage.getItem("mecord_session") || "",
@@ -219,7 +221,8 @@ const viewMeta = {
   targets: ["ASSETS", "Targets", "Add target"],
   findings: ["EVIDENCE", "Findings", "Refresh"],
   findingDetail: ["ENGINEERING", "Finding", "Refresh"],
-  approvals: ["HUMAN GATES", "Approvals", "Refresh"],
+  approvals: ["HUMAN GATES", "Approval inbox", "Refresh"],
+  approvalDetail: ["HUMAN GATES", "Approval review", "Refresh"],
   pipeline: ["COMMERCIAL", "Pipeline", "Refresh"],
   operations: ["RUNTIME", "Operations", "Refresh"],
   integrations: ["CONNECTIONS", "Integrations", "Add integration"],
@@ -236,6 +239,7 @@ const breadcrumbForView = {
   findingDetail: "Workspace / Engineering / Findings / Detail",
   operations: "Workspace / Engineering / Runs",
   approvals: "Workspace / Repair / Approval inbox",
+  approvalDetail: "Workspace / Repair / Approval review",
   pipeline: "Workspace / Revenue / Opportunities",
   integrations: "Workspace / Integrations",
   team: "Workspace / Team & Access",
@@ -249,7 +253,11 @@ async function render() {
   $("#view-title").textContent = title;
   $("#breadcrumb").textContent = breadcrumbForView[state.view] || "Workspace";
   $("#primary-action").textContent = action;
-  const activeView = state.view === "findingDetail" ? "findings" : state.view;
+  const activeView = state.view === "findingDetail"
+    ? "findings"
+    : state.view === "approvalDetail"
+      ? "approvals"
+      : state.view;
   document.querySelectorAll(".nav-item").forEach((node) => {
     node.classList.toggle("active", node.dataset.view === activeView);
   });
@@ -262,6 +270,7 @@ async function render() {
       findings: renderFindings,
       findingDetail: renderFindingDetail,
       approvals: renderApprovals,
+      approvalDetail: renderApprovalDetail,
       pipeline: renderPipeline,
       operations: renderOperations,
       integrations: renderIntegrations,
@@ -661,36 +670,30 @@ async function renderFindingDetail() {
 }
 
 async function renderApprovals() {
-  const data = await api(`/v1/platform/workspaces/${state.workspaceId}/approvals?limit=200`);
-  content.innerHTML = tablePanel(
-    "Approval inbox",
-    ["Type", "Target", "Status", "Requested by", "Expires", "Decision"],
-    data.approvals.map((item) => [
-      `<span class="primary-text">${escapeHtml(item.action_type)}</span>`,
-      escapeHtml(item.organization_name),
-      chip(item.status),
-      escapeHtml(item.requested_by),
-      escapeHtml(fmtDate(item.expires_at)),
-      item.status === "PENDING"
-        ? `<div class="filters"><button class="button small primary approval-action" data-id="${item.id}" data-decision="approve">Approve</button> <button class="button small danger approval-action" data-id="${item.id}" data-decision="reject">Reject</button></div>`
-        : escapeHtml(item.decided_by || "—"),
-    ]),
-    "Nothing waiting",
-    "Approval-gated operations will appear here.",
-  );
-  document.querySelectorAll(".approval-action").forEach((button) => {
-    button.addEventListener("click", async () => {
-      try {
-        await api(
-          `/v1/platform/workspaces/${state.workspaceId}/approvals/${button.dataset.id}/${button.dataset.decision}`,
-          { method: "POST", body: JSON.stringify({}) },
-        );
-        toast(`Approval ${button.dataset.decision}d`);
-        await renderApprovals();
-      } catch (error) {
-        toast(error.message, true);
-      }
-    });
+  await renderApprovalsView({
+    container: content,
+    api,
+    workspaceId: state.workspaceId,
+    fmtDate,
+    navigate: (path) => navigateConsole(path),
+  });
+}
+
+async function renderApprovalDetail() {
+  if (!state.params.approvalId) {
+    navigateConsole("/console/approvals", { replace: true });
+    return;
+  }
+  await renderApprovalDetailView({
+    container: content,
+    api,
+    workspaceId: state.workspaceId,
+    approvalId: state.params.approvalId,
+    workspace: currentWorkspace(),
+    fmtDate,
+    navigate: (path) => navigateConsole(path),
+    openAuthorization: openAuthorizationCenter,
+    toast,
   });
 }
 
@@ -941,6 +944,10 @@ $("#workspace-select").addEventListener("change",async(event)=>{
   sessionStorage.setItem("mecord_workspace",state.workspaceId);
   if (state.view === "findingDetail") {
     navigateConsole("/console/findings");
+    return;
+  }
+  if (state.view === "approvalDetail") {
+    navigateConsole("/console/approvals");
     return;
   }
   await render();

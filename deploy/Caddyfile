@@ -19,7 +19,11 @@
     reverse_proxy control-api:8080
   }
 
-  handle /console* {
+  handle /console {
+    reverse_proxy control-api:8080
+  }
+
+  handle /console/* {
     reverse_proxy control-api:8080
   }
 

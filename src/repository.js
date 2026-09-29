@@ -126,7 +126,9 @@ export async function createAuthorizedJob({
        )
        VALUES ($1, $2, $3, $4, $5, $6::jsonb)
        RETURNING id, target_id, authorization_id, job_type, capability,
-                 requested_url, state, input, created_at`,
+                 requested_url, state, input, output, error, created_at,
+                 started_at, completed_at, lease_owner, lease_expires_at,
+                 attempt_count`,
       [
         targetId,
         authorizationId,
@@ -191,13 +193,245 @@ export async function getJob(jobId) {
   const result = await pool.query(
     `SELECT id, target_id, authorization_id, job_type, capability,
             requested_url, state, input, output, error, created_at,
-            started_at, completed_at
+            started_at, completed_at, lease_owner, lease_expires_at,
+            attempt_count
        FROM jobs
       WHERE id = $1`,
     [jobId],
   );
 
   return result.rows[0] ? mapJob(result.rows[0]) : null;
+}
+
+export async function leaseNextJob({
+  workerId,
+  capabilities,
+  leaseSeconds = 60,
+}) {
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const result = await client.query(
+      `WITH candidate AS (
+         SELECT id
+           FROM jobs
+          WHERE capability = ANY($1::text[])
+            AND (
+              state = 'QUEUED'
+              OR (
+                state = 'RUNNING'
+                AND lease_expires_at IS NOT NULL
+                AND lease_expires_at <= now()
+              )
+            )
+          ORDER BY created_at
+          FOR UPDATE SKIP LOCKED
+          LIMIT 1
+       )
+       UPDATE jobs AS j
+          SET state = 'RUNNING',
+              lease_owner = $2,
+              lease_expires_at = now() + ($3 * interval '1 second'),
+              attempt_count = j.attempt_count + 1,
+              started_at = COALESCE(j.started_at, now())
+         FROM candidate
+        WHERE j.id = candidate.id
+       RETURNING j.id, j.target_id, j.authorization_id, j.job_type,
+                 j.capability, j.requested_url, j.state, j.input,
+                 j.output, j.error, j.created_at, j.started_at,
+                 j.completed_at, j.lease_owner, j.lease_expires_at,
+                 j.attempt_count`,
+      [capabilities, workerId, leaseSeconds],
+    );
+
+    if (result.rowCount === 0) {
+      await client.query("COMMIT");
+      return null;
+    }
+
+    const job = result.rows[0];
+
+    await client.query(
+      `INSERT INTO audit_events (target_id, job_id, event_type, payload)
+       VALUES ($1, $2, 'JOB_LEASED', $3::jsonb)`,
+      [
+        job.target_id,
+        job.id,
+        JSON.stringify({
+          workerId,
+          leaseExpiresAt: job.lease_expires_at,
+          attemptCount: job.attempt_count,
+        }),
+      ],
+    );
+
+    await client.query("COMMIT");
+    return mapJob(job);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function upsertFindingFromLease({
+  jobId,
+  workerId,
+  finding,
+}) {
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const jobResult = await client.query(
+      `SELECT id, target_id
+         FROM jobs
+        WHERE id = $1
+          AND state = 'RUNNING'
+          AND lease_owner = $2
+          AND lease_expires_at > now()
+        FOR UPDATE`,
+      [jobId, workerId],
+    );
+
+    if (jobResult.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+
+    const job = jobResult.rows[0];
+
+    const result = await client.query(
+      `INSERT INTO findings (
+         target_id,
+         first_job_id,
+         last_job_id,
+         fingerprint,
+         category,
+         title,
+         severity,
+         confidence,
+         affected_url,
+         evidence
+       )
+       VALUES ($1, $2, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
+       ON CONFLICT (target_id, fingerprint)
+       DO UPDATE SET
+         last_job_id = EXCLUDED.last_job_id,
+         category = EXCLUDED.category,
+         title = EXCLUDED.title,
+         severity = EXCLUDED.severity,
+         confidence = EXCLUDED.confidence,
+         affected_url = EXCLUDED.affected_url,
+         evidence = EXCLUDED.evidence,
+         occurrences = findings.occurrences + 1,
+         last_seen_at = now()
+       RETURNING id, target_id, first_job_id, last_job_id, fingerprint,
+                 category, title, severity, confidence, affected_url,
+                 evidence, occurrences, status, first_seen_at, last_seen_at`,
+      [
+        job.target_id,
+        jobId,
+        finding.fingerprint,
+        finding.category,
+        finding.title,
+        finding.severity,
+        finding.confidence,
+        finding.affectedUrl,
+        JSON.stringify(finding.evidence || {}),
+      ],
+    );
+
+    await client.query(
+      `INSERT INTO audit_events (target_id, job_id, event_type, payload)
+       VALUES ($1, $2, 'FINDING_RECORDED', $3::jsonb)`,
+      [
+        job.target_id,
+        jobId,
+        JSON.stringify({
+          findingId: result.rows[0].id,
+          fingerprint: finding.fingerprint,
+        }),
+      ],
+    );
+
+    await client.query("COMMIT");
+    return mapFinding(result.rows[0]);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function completeLeasedJob({
+  jobId,
+  workerId,
+  state,
+  output,
+  error,
+}) {
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const result = await client.query(
+      `UPDATE jobs
+          SET state = $3,
+              output = $4::jsonb,
+              error = $5::jsonb,
+              completed_at = now(),
+              lease_owner = NULL,
+              lease_expires_at = NULL
+        WHERE id = $1
+          AND lease_owner = $2
+          AND state = 'RUNNING'
+          AND lease_expires_at > now()
+       RETURNING id, target_id, authorization_id, job_type, capability,
+                 requested_url, state, input, output, error, created_at,
+                 started_at, completed_at, lease_owner, lease_expires_at,
+                 attempt_count`,
+      [
+        jobId,
+        workerId,
+        state,
+        JSON.stringify(output || null),
+        JSON.stringify(error || null),
+      ],
+    );
+
+    if (result.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+
+    const job = result.rows[0];
+
+    await client.query(
+      `INSERT INTO audit_events (target_id, job_id, event_type, payload)
+       VALUES ($1, $2, $3, $4::jsonb)`,
+      [
+        job.target_id,
+        job.id,
+        state === "SUCCEEDED" ? "JOB_SUCCEEDED" : "JOB_FAILED",
+        JSON.stringify({ workerId }),
+      ],
+    );
+
+    await client.query("COMMIT");
+    return mapJob(job);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function closePool() {
@@ -233,5 +467,28 @@ function mapJob(row) {
     createdAt: row.created_at,
     startedAt: row.started_at,
     completedAt: row.completed_at,
+    leaseOwner: row.lease_owner,
+    leaseExpiresAt: row.lease_expires_at,
+    attemptCount: row.attempt_count,
+  };
+}
+
+function mapFinding(row) {
+  return {
+    id: row.id,
+    targetId: row.target_id,
+    firstJobId: row.first_job_id,
+    lastJobId: row.last_job_id,
+    fingerprint: row.fingerprint,
+    category: row.category,
+    title: row.title,
+    severity: row.severity,
+    confidence: Number(row.confidence),
+    affectedUrl: row.affected_url,
+    evidence: row.evidence,
+    occurrences: row.occurrences,
+    status: row.status,
+    firstSeenAt: row.first_seen_at,
+    lastSeenAt: row.last_seen_at,
   };
 }

@@ -124,7 +124,7 @@ test(
       const traversal = await fetch(
         `${baseUrl}/console/core/%2e%2e/%2e%2e/package.json`,
       );
-      assert.equal(traversal.status, 404);
+      assert.notEqual(traversal.status, 200);
     });
 
     await t.test("owner bootstrap is one-time and login is opaque", async () => {

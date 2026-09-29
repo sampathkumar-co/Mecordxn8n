@@ -31,6 +31,7 @@ import { serveConsoleAsset } from "./platform/static.js";
 import {
   handleIntegrationPlatformRoute,
   handleIntegrationWebhookRoute,
+  handleIntegrationWorkerRoute,
 } from "./integrations/routes.js";
 
 const MAX_BODY_BYTES = 256 * 1024;
@@ -378,6 +379,16 @@ export function createServer({
       ) {
         return json(res, 200, await runPlatformMaintenance());
       }
+
+      const integrationWorkerHandled = await handleIntegrationWorkerRoute({
+        req,
+        res,
+        url,
+        json,
+        readJson,
+        badRequest,
+      });
+      if (integrationWorkerHandled !== false) return;
 
       const milestoneCHandled = await handleMilestoneCRoute({
         req,

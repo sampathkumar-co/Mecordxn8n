@@ -6,12 +6,15 @@ const requiredFiles = [
   "src/integrations/routes.js",
   "src/integrations/repository.js",
   "src/integrations/delivery.js",
-  "src/workers/integration-dispatcher-service.js",
+  "src/workers/integration-worker.js",
+  "src/workers/integration-service.js",
   "web/console/index.html",
   "web/console/app.js",
   "scripts/backup-database.mjs",
   "scripts/restore-verify.mjs",
   ".github/workflows/security.yml",
+  ".github/workflows/release.yml",
+  "n8n/workflows/integration-delivery-dispatch.json",
 ];
 
 const missingFiles = requiredFiles.filter((file) => !fs.existsSync(file));

@@ -8,15 +8,19 @@ import {
   assertAuthorized,
 } from "./authorization.js";
 import {
+  completeLeasedJob,
   createAuthorizedJob,
   createTargetWithAuthorization,
   getCurrentAuthorization,
   getJob,
+  leaseNextJob,
   pingDatabase,
   recordDeniedJob,
+  upsertFindingFromLease,
 } from "./repository.js";
 
 const MAX_BODY_BYTES = 256 * 1024;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function json(res, statusCode, value) {
   const body = JSON.stringify(value);
@@ -96,6 +100,10 @@ function normalizeTargetInput(body) {
     throw badRequest("authorization.allowedHosts must contain at least one exact hostname");
   }
 
+  if (!allowedHosts.includes(base.hostname.toLowerCase())) {
+    throw badRequest("baseUrl hostname must be present in authorization.allowedHosts");
+  }
+
   const allowedCapabilities = Array.isArray(authorization.allowedCapabilities)
     ? [...new Set(authorization.allowedCapabilities)]
     : [];
@@ -103,6 +111,16 @@ function normalizeTargetInput(body) {
   for (const capability of allowedCapabilities) {
     if (!Object.values(CAPABILITIES).includes(capability)) {
       throw badRequest(`unknown capability: ${capability}`);
+    }
+  }
+
+  if (authorization.expiresAt) {
+    const expiry = new Date(authorization.expiresAt);
+    if (Number.isNaN(expiry.getTime())) {
+      throw badRequest("authorization.expiresAt is invalid");
+    }
+    if (expiry.getTime() <= Date.now()) {
+      throw badRequest("authorization.expiresAt must be in the future");
     }
   }
 
@@ -130,7 +148,9 @@ function normalizeTargetInput(body) {
 }
 
 function normalizeJobInput(body) {
-  if (!body?.targetId) throw badRequest("targetId is required");
+  if (!body?.targetId || !UUID_RE.test(body.targetId)) {
+    throw badRequest("targetId must be a valid UUID");
+  }
   if (!body?.jobType?.trim()) throw badRequest("jobType is required");
   if (!Object.values(CAPABILITIES).includes(body.capability)) {
     throw badRequest("capability is invalid");
@@ -146,6 +166,76 @@ function normalizeJobInput(body) {
   };
 }
 
+function normalizeLeaseInput(body) {
+  if (!body?.workerId?.trim()) throw badRequest("workerId is required");
+  if (!Array.isArray(body.capabilities) || body.capabilities.length === 0) {
+    throw badRequest("capabilities must contain at least one capability");
+  }
+
+  const capabilities = [...new Set(body.capabilities)];
+  for (const capability of capabilities) {
+    if (!Object.values(CAPABILITIES).includes(capability)) {
+      throw badRequest(`unknown capability: ${capability}`);
+    }
+  }
+
+  const leaseSeconds = Number(body.leaseSeconds ?? 60);
+  if (!Number.isInteger(leaseSeconds) || leaseSeconds < 15 || leaseSeconds > 300) {
+    throw badRequest("leaseSeconds must be an integer from 15 to 300");
+  }
+
+  return {
+    workerId: body.workerId.trim(),
+    capabilities,
+    leaseSeconds,
+  };
+}
+
+function normalizeFindingInput(body) {
+  if (!body?.workerId?.trim()) throw badRequest("workerId is required");
+  const finding = body.finding;
+  if (!finding || typeof finding !== "object") throw badRequest("finding is required");
+  if (!finding.fingerprint?.trim()) throw badRequest("finding.fingerprint is required");
+  if (!finding.category?.trim()) throw badRequest("finding.category is required");
+  if (!finding.title?.trim()) throw badRequest("finding.title is required");
+  if (!["INFO", "LOW", "MEDIUM", "HIGH"].includes(finding.severity)) {
+    throw badRequest("finding.severity is invalid");
+  }
+
+  const confidence = Number(finding.confidence);
+  if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
+    throw badRequest("finding.confidence must be between 0 and 1");
+  }
+  if (!finding.affectedUrl) throw badRequest("finding.affectedUrl is required");
+
+  return {
+    workerId: body.workerId.trim(),
+    finding: {
+      fingerprint: finding.fingerprint.trim(),
+      category: finding.category.trim(),
+      title: finding.title.trim(),
+      severity: finding.severity,
+      confidence,
+      affectedUrl: finding.affectedUrl,
+      evidence: finding.evidence || {},
+    },
+  };
+}
+
+function normalizeCompletionInput(body) {
+  if (!body?.workerId?.trim()) throw badRequest("workerId is required");
+  if (!["SUCCEEDED", "FAILED"].includes(body.state)) {
+    throw badRequest("state must be SUCCEEDED or FAILED");
+  }
+
+  return {
+    workerId: body.workerId.trim(),
+    state: body.state,
+    output: body.output || null,
+    error: body.error || null,
+  };
+}
+
 function badRequest(message) {
   const error = new Error(message);
   error.statusCode = 400;
@@ -154,9 +244,13 @@ function badRequest(message) {
 
 export function createServer({
   orchestratorToken = process.env.ORCHESTRATOR_TOKEN,
+  workerToken = process.env.WORKER_TOKEN,
 } = {}) {
   if (!orchestratorToken) {
     throw new Error("ORCHESTRATOR_TOKEN is required");
+  }
+  if (!workerToken) {
+    throw new Error("WORKER_TOKEN is required");
   }
 
   return http.createServer(async (req, res) => {
@@ -168,8 +262,44 @@ export function createServer({
         return json(res, 200, { ok: true });
       }
 
-      if (!requireBearer(req, orchestratorToken)) {
+      const workerRoute = url.pathname.startsWith("/v1/worker/");
+      if (!requireBearer(req, workerRoute ? workerToken : orchestratorToken)) {
         return json(res, 401, { error: "UNAUTHORIZED" });
+      }
+
+      if (req.method === "POST" && url.pathname === "/v1/worker/jobs/lease") {
+        const body = normalizeLeaseInput(await readJson(req));
+        const job = await leaseNextJob(body);
+        if (!job) return json(res, 204, {});
+        return json(res, 200, job);
+      }
+
+      const findingMatch = url.pathname.match(/^\/v1\/worker\/jobs\/([0-9a-f-]+)\/findings$/i);
+      if (req.method === "POST" && findingMatch) {
+        if (!UUID_RE.test(findingMatch[1])) throw badRequest("job id is invalid");
+        const body = normalizeFindingInput(await readJson(req));
+        const finding = await upsertFindingFromLease({
+          jobId: findingMatch[1],
+          ...body,
+        });
+        if (!finding) {
+          return json(res, 409, { error: "LEASE_NOT_OWNED_OR_EXPIRED" });
+        }
+        return json(res, 201, finding);
+      }
+
+      const completionMatch = url.pathname.match(/^\/v1\/worker\/jobs\/([0-9a-f-]+)\/complete$/i);
+      if (req.method === "POST" && completionMatch) {
+        if (!UUID_RE.test(completionMatch[1])) throw badRequest("job id is invalid");
+        const body = normalizeCompletionInput(await readJson(req));
+        const job = await completeLeasedJob({
+          jobId: completionMatch[1],
+          ...body,
+        });
+        if (!job) {
+          return json(res, 409, { error: "LEASE_NOT_OWNED_OR_EXPIRED" });
+        }
+        return json(res, 200, job);
       }
 
       if (req.method === "POST" && url.pathname === "/v1/targets") {
@@ -193,6 +323,7 @@ export function createServer({
           if (error instanceof AuthorizationError) {
             await recordDeniedJob({
               ...body,
+              targetId: authorization ? body.targetId : null,
               code: error.code,
               message: error.message,
             });
@@ -215,6 +346,7 @@ export function createServer({
 
       const jobMatch = url.pathname.match(/^\/v1\/jobs\/([0-9a-f-]+)$/i);
       if (req.method === "GET" && jobMatch) {
+        if (!UUID_RE.test(jobMatch[1])) throw badRequest("job id is invalid");
         const job = await getJob(jobMatch[1]);
         if (!job) return json(res, 404, { error: "JOB_NOT_FOUND" });
         return json(res, 200, job);

@@ -489,3 +489,10 @@ export async function getReport(reportId) {
   );
   return result.rows[0] || null;
 }
+
+export async function markFindingVerifying(findingId) {
+  await pool.query(
+    `UPDATE findings SET verification_state = 'VERIFYING' WHERE id = $1`,
+    [findingId],
+  );
+}

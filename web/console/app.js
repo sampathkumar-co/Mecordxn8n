@@ -9,6 +9,8 @@ import { renderHomeView } from "/console/views/home.js";
 import { renderApprovalsView } from "/console/views/approvals.js";
 import { renderApprovalDetailView } from "/console/views/approval-detail.js";
 import { renderTargetDetailView } from "/console/views/target-detail.js";
+import { renderRunsView } from "/console/views/runs.js";
+import { renderRunDetailView } from "/console/views/run-detail.js";
 
 const state = {
   token: sessionStorage.getItem("mecord_session") || "",
@@ -226,7 +228,8 @@ const viewMeta = {
   approvals: ["HUMAN GATES", "Approval inbox", "Refresh"],
   approvalDetail: ["HUMAN GATES", "Approval review", "Refresh"],
   pipeline: ["COMMERCIAL", "Pipeline", "Refresh"],
-  operations: ["RUNTIME", "Operations", "Refresh"],
+  operations: ["RUNTIME", "Runs & recovery", "Refresh"],
+  runDetail: ["RUNTIME", "Run detail", "Refresh"],
   integrations: ["CONNECTIONS", "Integrations", "Add integration"],
   team: ["ACCESS", "Team & Access", "Invite member"],
   audit: ["GOVERNANCE", "Audit", "Refresh"],
@@ -241,6 +244,7 @@ const breadcrumbForView = {
   findings: "Workspace / Engineering / Findings",
   findingDetail: "Workspace / Engineering / Findings / Detail",
   operations: "Workspace / Engineering / Runs",
+  runDetail: "Workspace / Engineering / Runs / Detail",
   approvals: "Workspace / Repair / Approval inbox",
   approvalDetail: "Workspace / Repair / Approval review",
   pipeline: "Workspace / Revenue / Opportunities",
@@ -262,7 +266,9 @@ async function render() {
       ? "approvals"
       : state.view === "targetDetail"
         ? "targets"
-        : state.view;
+        : state.view === "runDetail"
+          ? "operations"
+          : state.view;
   document.querySelectorAll(".nav-item").forEach((node) => {
     node.classList.toggle("active", node.dataset.view === activeView);
   });
@@ -279,6 +285,7 @@ async function render() {
       approvalDetail: renderApprovalDetail,
       pipeline: renderPipeline,
       operations: renderOperations,
+      runDetail: renderRunDetail,
       integrations: renderIntegrations,
       team: renderTeam,
       audit: renderAudit,
@@ -645,27 +652,31 @@ async function renderPipeline() {
 }
 
 async function renderOperations() {
-  const data = await api(`/v1/platform/workspaces/${state.workspaceId}/operations?limit=150`);
-  content.innerHTML = `
-    ${tablePanel("Recent jobs",["State","Job","Target","Attempts","Cost","Created"],data.jobs.map((item)=>[
-      chip(item.state),
-      `<div class="primary-text">${escapeHtml(item.job_type)}</div><div class="secondary-text">${escapeHtml(item.capability)}</div>`,
-      escapeHtml(item.organization_name),
-      `${escapeHtml(item.attempt_count)}/${escapeHtml(item.max_attempts)}`,
-      escapeHtml(item.cost_units),
-      escapeHtml(fmtDate(item.created_at)),
-    ]),"No jobs","Authorized work will appear here.")}
-    <div class="split">
-      ${tablePanel("Regressions",["Severity","Signal","Target","Status"],data.regressions.map((item)=>[
-        chip(item.severity),escapeHtml(item.summary),escapeHtml(item.organization_name),chip(item.status)
-      ]),"No regressions","Continuous monitoring is healthy.")}
-      ${tablePanel("Monitors",["Monitor","Target","Enabled","Failures"],data.monitors.map((item)=>[
-        `<div class="primary-text">${escapeHtml(item.name)}</div><div class="secondary-text">${escapeHtml(item.capability)} · ${escapeHtml(item.cadence_minutes)}m</div>`,
-        escapeHtml(item.organization_name),
-        chip(item.enabled ? "ACTIVE" : "DISABLED"),
-        escapeHtml(item.consecutive_failures),
-      ]),"No monitors","Create a continuous monitor from a target.")}
-    </div>`;
+  await renderRunsView({
+    container: content,
+    api,
+    workspaceId: state.workspaceId,
+    workspace: currentWorkspace(),
+    fmtDate,
+    navigate: (path) => navigateConsole(path),
+    toast,
+  });
+}
+
+async function renderRunDetail() {
+  if (!state.params.jobId) {
+    navigateConsole("/console/runs", { replace: true });
+    return;
+  }
+  await renderRunDetailView({
+    container: content,
+    api,
+    workspaceId: state.workspaceId,
+    jobId: state.params.jobId,
+    workspace: currentWorkspace(),
+    fmtDate,
+    navigate: (path) => navigateConsole(path),
+  });
 }
 
 async function renderTeam() {
@@ -880,6 +891,10 @@ $("#workspace-select").addEventListener("change",async(event)=>{
   }
   if (state.view === "approvalDetail") {
     navigateConsole("/console/approvals");
+    return;
+  }
+  if (state.view === "runDetail") {
+    navigateConsole("/console/runs");
     return;
   }
   await render();

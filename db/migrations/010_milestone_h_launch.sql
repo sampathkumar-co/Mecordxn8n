@@ -1,6 +1,5 @@
 ALTER TABLE platform_users
-  ADD COLUMN IF NOT EXISTS is_platform_operator boolean NOT NULL DEFAULT false,
-  ADD COLUMN IF NOT EXISTS email_verified_at timestamptz;
+  ADD COLUMN IF NOT EXISTS is_platform_operator boolean NOT NULL DEFAULT false;
 
 ALTER TABLE workspace_subscriptions
   ADD COLUMN IF NOT EXISTS trial_ends_at timestamptz,
@@ -83,15 +82,6 @@ CREATE TABLE IF NOT EXISTS billing_checkout_sessions (
 CREATE INDEX IF NOT EXISTS billing_checkout_sessions_workspace_idx
   ON billing_checkout_sessions(workspace_id, created_at DESC);
 
-CREATE TABLE IF NOT EXISTS platform_incident_acknowledgements (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  workspace_id uuid REFERENCES workspaces(id) ON DELETE CASCADE,
-  incident_key text NOT NULL,
-  acknowledged_by uuid NOT NULL REFERENCES platform_users(id) ON DELETE CASCADE,
-  note text,
-  acknowledged_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (workspace_id, incident_key)
-);
 
 UPDATE platform_users
    SET is_platform_operator = true

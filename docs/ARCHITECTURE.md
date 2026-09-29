@@ -241,3 +241,47 @@ Recurring service agreements require positive net received revenue before activa
 ### n8n role
 
 The inactive `commercial-maintenance.json` workflow calls the Control API every 15 minutes to retrieve due follow-ups, renewals, and approved manual actions. It neither grants approval nor sends external messages.
+
+
+## V1 platform architecture
+
+The platform layer wraps the existing authorization-gated engineering engine; it does not replace its policy boundaries.
+
+### Workspace boundary
+
+Customer product requests authenticate as a session or API-key principal and resolve workspace membership/scopes before repository access. Targets carry a non-null `workspace_id`, so tenant-scoped queries do not infer tenancy from user-supplied target IDs.
+
+Trusted internal worker/orchestrator tokens remain distinct from customer sessions and API keys.
+
+### Integration boundary
+
+Provider secrets are encrypted in `integration_connections`. The Control API decrypts them only for a currently leased integration delivery or signed webhook verification.
+
+The durable flow is:
+
+```text
+product transaction
+  -> workspace integration event
+  -> integration_outbox
+  -> n8n trigger
+  -> integration worker lease
+  -> provider adapter
+  -> success / retry / dead-letter
+```
+
+Outbox creation can participate in the same PostgreSQL transaction as the product event, preventing a committed finding/revenue event from silently losing its integration notification.
+
+Generic webhooks are restricted to credential-free HTTPS URLs whose DNS answers resolve to public addresses, and deliveries are HMAC signed. Stripe and GitHub inbound webhook signatures are verified before processing and provider event IDs are replay-deduplicated.
+
+### Release trust boundary
+
+Release certification separates software correctness, security hygiene and recoverability:
+
+- correctness: full PostgreSQL-backed automated suite;
+- dependency/secrets: npm audit + repository scan;
+- container/filesystem vulnerability gate: Trivy HIGH/CRITICAL;
+- performance: deterministic synthetic hot-path benchmark with a minimum floor;
+- recoverability: PostgreSQL 17 custom backup restored into a clean database and canonical tables verified;
+- deployability: Docker Compose validation plus control/browser production image builds.
+
+A green release gate certifies repository artifacts and deployment definitions. It is not evidence that external DNS, TLS, cloud infrastructure, customer credentials, or third-party provider accounts have been provisioned.

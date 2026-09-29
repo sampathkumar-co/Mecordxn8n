@@ -310,6 +310,24 @@ export async function recordMonitoringRunFromLease({
       return null;
     }
 
+    const existingRun = await client.query(
+      `SELECT id, policy_id, state, fingerprint
+         FROM monitoring_runs
+        WHERE job_id = $1`,
+      [jobId],
+    );
+    if (existingRun.rowCount > 0) {
+      await client.query("COMMIT");
+      return {
+        id: existingRun.rows[0].id,
+        policyId: existingRun.rows[0].policy_id,
+        state: existingRun.rows[0].state,
+        fingerprint: existingRun.rows[0].fingerprint,
+        regressions: [],
+        duplicate: true,
+      };
+    }
+
     const previousResult = await client.query(
       `SELECT snapshot
          FROM monitoring_runs
@@ -360,7 +378,7 @@ export async function recordMonitoringRunFromLease({
              category, severity, summary, evidence
            )
            VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb)
-           ON CONFLICT (policy_id, fingerprint, status)
+           ON CONFLICT (policy_id, fingerprint) WHERE status = 'OPEN'
            DO UPDATE SET
              monitoring_run_id = EXCLUDED.monitoring_run_id,
              severity = EXCLUDED.severity,
@@ -670,4 +688,29 @@ export async function getOperationalMetrics() {
       jobCount: usage.rows[0].job_count,
     },
   };
+}
+
+export async function findRemediationByApprovalId(approvalId) {
+  const result = await pool.query(
+    `SELECT j.*, r.id AS remediation_request_id,
+            r.status AS remediation_status, r.project_root
+       FROM jobs j
+       LEFT JOIN remediation_requests r ON r.job_id = j.id
+      WHERE j.input->>'approvalId' = $1
+      ORDER BY j.created_at DESC
+      LIMIT 1`,
+    [approvalId],
+  );
+  return result.rows[0] || null;
+}
+
+export async function markReportApproved(reportId) {
+  const result = await pool.query(
+    `UPDATE reports
+        SET status = 'APPROVED'
+      WHERE id = $1 AND status = 'READY'
+      RETURNING id, target_id, kind, status, markdown, summary, created_at`,
+    [reportId],
+  );
+  return result.rows[0] || null;
 }

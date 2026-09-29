@@ -26,36 +26,31 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    command: >
-      sh -c "node scripts/migrate.mjs && node src/server.js"
+    command: sh -c "node scripts/migrate.mjs && node src/server.js"
     ports:
       - "127.0.0.1:8080:8080"
 
   http-observer:
     build: .
     restart: unless-stopped
-    environment:
+    environment: &worker-env
       MECORDXN8N_CONTROL_API_URL: http://control-api:8080
       WORKER_TOKEN: ${WORKER_TOKEN}
       WORKER_TRIGGER_TOKEN: ${WORKER_TRIGGER_TOKEN}
-      WORKER_ID: public-http-observer
-      WORKER_PORT: 8090
     depends_on:
       control-api:
         condition: service_started
     command: node src/workers/http-observer-service.js
 
   browser-qa:
-    build:
+    build: &browser-build
       context: .
       dockerfile: Dockerfile.browser
     restart: unless-stopped
     user: pwuser
     ipc: host
     environment:
-      MECORDXN8N_CONTROL_API_URL: http://control-api:8080
-      WORKER_TOKEN: ${WORKER_TOKEN}
-      WORKER_TRIGGER_TOKEN: ${WORKER_TRIGGER_TOKEN}
+      <<: *worker-env
       WORKER_ID: browser-qa-worker
       WORKER_PORT: 8091
       ARTIFACT_DIR: /artifacts
@@ -65,6 +60,72 @@ services:
     command: node src/workers/browser-qa-service.js
     volumes:
       - artifacts_data:/artifacts
+
+  site-discovery:
+    build: *browser-build
+    restart: unless-stopped
+    user: pwuser
+    ipc: host
+    environment:
+      <<: *worker-env
+      WORKER_ID: site-discovery-worker
+      WORKER_PORT: 8092
+      ARTIFACT_DIR: /artifacts
+    depends_on:
+      control-api:
+        condition: service_started
+    command: node src/workers/site-discovery-service.js
+    volumes:
+      - artifacts_data:/artifacts
+
+  journey-qa:
+    build: *browser-build
+    restart: unless-stopped
+    user: pwuser
+    ipc: host
+    environment:
+      <<: *worker-env
+      WORKER_ID: journey-qa-worker
+      WORKER_PORT: 8093
+      ARTIFACT_DIR: /artifacts
+    depends_on:
+      control-api:
+        condition: service_started
+    command: node src/workers/journey-qa-service.js
+    volumes:
+      - artifacts_data:/artifacts
+
+  finding-verification:
+    build: *browser-build
+    restart: unless-stopped
+    user: pwuser
+    ipc: host
+    environment:
+      <<: *worker-env
+      WORKER_ID: finding-verification-worker
+      WORKER_PORT: 8094
+      ARTIFACT_DIR: /artifacts
+    depends_on:
+      control-api:
+        condition: service_started
+    command: node src/workers/finding-verification-service.js
+    volumes:
+      - artifacts_data:/artifacts
+
+  remediation:
+    build: .
+    restart: unless-stopped
+    environment:
+      <<: *worker-env
+      WORKER_ID: mecord-remediation-worker
+      WORKER_PORT: 8095
+      MECORD_MCP_URL: ${MECORD_MCP_URL:-}
+      MECORD_MCP_TOKEN: ${MECORD_MCP_TOKEN:-}
+      MECORD_MCP_REMEDIATION_TOOL: ${MECORD_MCP_REMEDIATION_TOOL:-operations}
+    depends_on:
+      control-api:
+        condition: service_started
+    command: node src/workers/remediation-service.js
 
   n8n:
     image: docker.n8n.io/n8nio/n8n:latest
@@ -83,19 +144,19 @@ services:
       N8N_DIAGNOSTICS_ENABLED: "false"
       N8N_PERSONALIZATION_ENABLED: "false"
       N8N_RUNNERS_ENABLED: "true"
-      MECORDXN8N_CONTROL_API_URL: ${MECORDXN8N_CONTROL_API_URL:-http://control-api:8080}
-      MECORDXN8N_ORCHESTRATOR_TOKEN: ${MECORDXN8N_ORCHESTRATOR_TOKEN}
-      MECORDXN8N_HTTP_OBSERVER_URL: ${MECORDXN8N_HTTP_OBSERVER_URL:-http://http-observer:8090}
-      MECORDXN8N_BROWSER_QA_URL: ${MECORDXN8N_BROWSER_QA_URL:-http://browser-qa:8091}
-      MECORDXN8N_WORKER_TRIGGER_TOKEN: ${MECORDXN8N_WORKER_TRIGGER_TOKEN}
+      MECORDXN8N_CONTROL_API_URL: http://control-api:8080
+      MECORDXN8N_ORCHESTRATOR_TOKEN: ${ORCHESTRATOR_TOKEN}
+      MECORDXN8N_HTTP_OBSERVER_URL: http://http-observer:8090
+      MECORDXN8N_BROWSER_QA_URL: http://browser-qa:8091
+      MECORDXN8N_SITE_DISCOVERY_URL: http://site-discovery:8092
+      MECORDXN8N_JOURNEY_QA_URL: http://journey-qa:8093
+      MECORDXN8N_VERIFICATION_URL: http://finding-verification:8094
+      MECORDXN8N_REMEDIATION_URL: http://remediation:8095
+      MECORDXN8N_WORKER_TRIGGER_TOKEN: ${WORKER_TRIGGER_TOKEN}
     depends_on:
       postgres:
         condition: service_healthy
       control-api:
-        condition: service_started
-      http-observer:
-        condition: service_started
-      browser-qa:
         condition: service_started
     ports:
       - "127.0.0.1:5678:5678"

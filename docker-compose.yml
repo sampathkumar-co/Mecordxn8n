@@ -50,17 +50,21 @@ services:
       context: .
       dockerfile: Dockerfile.browser
     restart: unless-stopped
+    user: pwuser
+    ipc: host
     environment:
       MECORDXN8N_CONTROL_API_URL: http://control-api:8080
       WORKER_TOKEN: ${WORKER_TOKEN}
       WORKER_TRIGGER_TOKEN: ${WORKER_TRIGGER_TOKEN}
       WORKER_ID: browser-qa-worker
       WORKER_PORT: 8091
+      ARTIFACT_DIR: /artifacts
     depends_on:
       control-api:
         condition: service_started
     command: node src/workers/browser-qa-service.js
-    shm_size: "512mb"
+    volumes:
+      - artifacts_data:/artifacts
 
   n8n:
     image: docker.n8n.io/n8nio/n8n:latest
@@ -97,7 +101,9 @@ services:
       - "127.0.0.1:5678:5678"
     volumes:
       - n8n_data:/home/node/.n8n
+      - artifacts_data:/artifacts:ro
 
 volumes:
   postgres_data:
   n8n_data:
+  artifacts_data:

@@ -279,7 +279,7 @@ Release certification separates software correctness, security hygiene and recov
 
 - correctness: full PostgreSQL-backed automated suite;
 - dependency/secrets: npm audit + repository scan;
-- container/filesystem vulnerability gate: Trivy HIGH/CRITICAL;
+- built production-image vulnerability gate: Trivy HIGH/CRITICAL on both control and browser images;
 - performance: deterministic synthetic hot-path benchmark with a minimum floor;
 - recoverability: PostgreSQL 17 custom backup restored into a clean database and canonical tables verified;
 - deployability: Docker Compose validation plus control/browser production image builds.
@@ -332,4 +332,53 @@ A generated report remains `READY`; it does not become public until the existing
 
 ### Production boundary
 
-Caddy is the only public ingress in the supplied production overlay. The Control API and n8n remain internal Compose services. Production preflight rejects placeholder/undersized secrets and invalid HTTPS/domain configuration before deployment.
+Caddy is the only public ingress in the supplied production overlay. It uses an explicit allowlist for the console, customer platform API, signed provider webhooks, and liveness only. Worker/orchestrator/maintenance/readiness routes are not public, and n8n remains private on the host/Compose network. Production preflight rejects placeholder/undersized secrets and invalid HTTPS/domain configuration before deployment.
+
+
+## Post-H failure hardening
+
+The post-H hardening pass reduces failure and attack surface without changing the authorization model.
+
+### Reproducible runtime artifacts
+
+CI and production Dockerfiles install dependencies with `npm ci` from the committed lockfile. Browser downloads are explicitly skipped during package install because the browser image already supplies its pinned Playwright runtime.
+
+### Public ingress
+
+Production Caddy follows an allowlist model:
+
+```text
+PUBLIC
+  /console
+  /console/*
+  /livez
+  /v1/platform/*
+  /v1/integrations/webhooks/*
+
+PRIVATE
+  /healthz
+  /v1/worker/*
+  /v1/maintenance/*
+  legacy orchestrator APIs
+  n8n editor/API
+```
+
+Authentication still applies behind the allowlist; the proxy restriction is an additional boundary, not a replacement.
+
+### Login behavior
+
+Unknown-account login attempts perform the same scrypt password-derivation work as existing-account attempts before returning the same opaque authentication failure. This reduces account-enumeration timing signal while retaining lockout behavior.
+
+### HTTP server limits
+
+The Control API configures bounded header/request/keep-alive behavior to reduce slow-client resource retention. Request-body limits remain enforced separately.
+
+### Operator identity
+
+Workspace OWNER and platform operator are deliberately different concepts. Migration 011 reconciles supported platform-operator identity to the auditable `PLATFORM_BOOTSTRAPPED` event so an historical workspace owner cannot inherit fleet-wide operator access merely because they were created first.
+
+### Console failure behavior
+
+The console performs bounded request timeouts and automatically retries only safe read requests for transient failures. Mutations such as approvals, billing, authorization changes, remediation, revocation and report release are never automatically replayed.
+
+The Control Center V2 information architecture and interaction model are specified in `docs/UI_UX_V2_PLAN.md`.

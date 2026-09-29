@@ -285,3 +285,51 @@ Release certification separates software correctness, security hygiene and recov
 - deployability: Docker Compose validation plus control/browser production image builds.
 
 A green release gate certifies repository artifacts and deployment definitions. It is not evidence that external DNS, TLS, cloud infrastructure, customer credentials, or third-party provider accounts have been provisioned.
+
+
+## Milestone H launch trust boundaries
+
+Milestone H adds customer self-service without weakening the A-G policy boundaries.
+
+### Self-serve privilege escalation
+
+A self-serve target can initially request only non-destructive capabilities. The customer platform route rejects initial `CLIENT_AUTHORIZED` and `SOURCE_REMEDIATION` requests.
+
+Privileged replacement authorization requires a current verified DNS ownership record for the exact target. Replacing authorization revokes the previous grant in the same transaction. Revocation cancels queued/running target jobs.
+
+This ownership proof is not remediation permission by itself. Source repair continues to require:
+
+```text
+verified domain ownership for self-serve privilege upgrade
+AND CLIENT_AUTHORIZED
+AND SOURCE_REMEDIATION capability
+AND VERIFIED finding
+AND explicit human approval
+AND current authorization at execution time
+```
+
+### Trial and subscription enforcement
+
+Workspace access resolves subscription state centrally. Operational write scopes (`targets:write`, `approvals:write`, `integrations:write`) require an ACTIVE subscription or a non-expired TRIALING subscription. Read-only and billing flows remain available after expiry/past-due so recovery is possible.
+
+Stripe secrets stay server-side. Checkout and Customer Portal are provider-hosted. Signed webhook reconciliation updates subscription/payment state.
+
+### Public boundary
+
+The unauthenticated launch surface is deliberately small:
+
+- self-serve signup;
+- signed Stripe billing webhook;
+- tokenized approved-report share reads.
+
+Signup abuse buckets store SHA-256 hashes of IP/email-derived keys rather than the raw values. Public report tokens are also stored only as hashes.
+
+### Onboarding finalization
+
+n8n only triggers finalization. PostgreSQL owns single-flight state. Finalizers claim rows with `FOR UPDATE SKIP LOCKED` and set `FINALIZING` before generating a report, preventing overlapping schedulers from creating duplicate first reports.
+
+A generated report remains `READY`; it does not become public until the existing report-release approval transitions it to `APPROVED`.
+
+### Production boundary
+
+Caddy is the only public ingress in the supplied production overlay. The Control API and n8n remain internal Compose services. Production preflight rejects placeholder/undersized secrets and invalid HTTPS/domain configuration before deployment.

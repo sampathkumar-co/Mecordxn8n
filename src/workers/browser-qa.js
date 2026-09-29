@@ -4,10 +4,13 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 
 import { CAPABILITIES } from "../authorization.js";
+import { normalizeMonitoringSnapshot } from "../milestone-b/regression.js";
 import {
   completeJob,
   leaseJob,
   recordFinding,
+  recordMonitoringFailure,
+  recordMonitoringRun,
 } from "./control-client.js";
 import { isPublicAddress } from "./public-http.js";
 import {
@@ -601,6 +604,22 @@ export async function runBrowserQaOnce({
       });
     }
 
+    let monitoring = null;
+    if (job.input?.monitoringPolicyId) {
+      monitoring = await recordMonitoringRun({
+        controlApiUrl,
+        workerToken,
+        jobId: job.id,
+        workerId,
+        policyId: job.input.monitoringPolicyId,
+        snapshot: normalizeMonitoringSnapshot(
+          CAPABILITIES.BROWSER_QA,
+          observation,
+        ),
+        costUnits: 1,
+      });
+    }
+
     const completed = await completeJob({
       controlApiUrl,
       workerToken,
@@ -610,6 +629,7 @@ export async function runBrowserQaOnce({
       output: {
         observation,
         findingsRecorded: findings.length,
+        monitoring,
       },
     });
 
@@ -620,6 +640,20 @@ export async function runBrowserQaOnce({
       job: completed,
     };
   } catch (error) {
+    if (job.input?.monitoringPolicyId) {
+      await recordMonitoringFailure({
+        controlApiUrl,
+        workerToken,
+        jobId: job.id,
+        policyId: job.input.monitoringPolicyId,
+        targetId: job.targetId,
+        error: {
+          code: error.code || "BROWSER_QA_FAILED",
+          message: compactText(error.message),
+        },
+      }).catch(() => {});
+    }
+
     try {
       await completeJob({
         controlApiUrl,

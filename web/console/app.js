@@ -43,36 +43,96 @@ function fmtMoney(minor, currency) {
   }
 }
 
+let toastTimer;
+
 function toast(message, error = false) {
   const node = $("#toast");
   node.textContent = message;
   node.classList.toggle("error", error);
   node.classList.add("show");
-  setTimeout(() => node.classList.remove("show"), 2600);
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => node.classList.remove("show"), 2600);
 }
 
+function setConnectionState(stateName) {
+  const badge = $("#connection-badge");
+  if (!badge) return;
+  badge.className = "status-pill";
+  if (stateName === "offline") {
+    badge.classList.add("danger");
+    badge.textContent = "Control API unreachable";
+  } else if (stateName === "degraded") {
+    badge.classList.add("warn");
+    badge.textContent = "Control API degraded";
+  } else {
+    badge.classList.add("good");
+    badge.textContent = "Control API online";
+  }
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 async function api(path, options = {}) {
-  const headers = new Headers(options.headers || {});
-  if (state.token) headers.set("Authorization", `Bearer ${state.token}`);
-  if (options.body && !headers.has("content-type")) {
-    headers.set("content-type", "application/json");
+  const method = String(options.method || "GET").toUpperCase();
+  const retryable = method === "GET" || method === "HEAD";
+  const attempts = retryable ? 2 : 1;
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const headers = new Headers(options.headers || {});
+    if (state.token) headers.set("Authorization", `Bearer ${state.token}`);
+    if (options.body && !headers.has("content-type")) {
+      headers.set("content-type", "application/json");
+    }
+
+    let response;
+    try {
+      response = await fetch(path, {
+        ...options,
+        headers,
+        signal: options.signal || AbortSignal.timeout(15_000),
+      });
+    } catch (error) {
+      setConnectionState("offline");
+      if (retryable && attempt + 1 < attempts) {
+        await sleep(200 + attempt * 250);
+        continue;
+      }
+      const timeout = error?.name === "TimeoutError";
+      const wrapped = new Error(
+        timeout
+          ? "The Control API did not respond in time."
+          : "Could not reach the Control API.",
+      );
+      wrapped.code = timeout ? "REQUEST_TIMEOUT" : "NETWORK_ERROR";
+      throw wrapped;
+    }
+
+    if ([429, 502, 503, 504].includes(response.status) && retryable && attempt + 1 < attempts) {
+      setConnectionState("degraded");
+      await sleep(250 + attempt * 300);
+      continue;
+    }
+
+    setConnectionState(response.status >= 500 ? "degraded" : "online");
+    const payload = response.status === 204
+      ? null
+      : await response.json().catch(() => ({ error: "INVALID_RESPONSE" }));
+
+    if (response.status === 401 && !path.includes("/auth/login")) {
+      signOut(false);
+      throw new Error("Your session has expired.");
+    }
+    if (!response.ok) {
+      const error = new Error(payload?.message || payload?.error || "Request failed");
+      error.code = payload?.error;
+      error.status = response.status;
+      error.payload = payload;
+      throw error;
+    }
+    return payload;
   }
-  const response = await fetch(path, { ...options, headers });
-  const payload = response.status === 204
-    ? null
-    : await response.json().catch(() => ({ error: "INVALID_RESPONSE" }));
-  if (response.status === 401 && !path.includes("/auth/login")) {
-    signOut(false);
-    throw new Error("Your session has expired.");
-  }
-  if (!response.ok) {
-    const error = new Error(payload?.message || payload?.error || "Request failed");
-    error.code = payload?.error;
-    error.status = response.status;
-    error.payload = payload;
-    throw error;
-  }
-  return payload;
+
+  throw new Error("Request failed");
 }
 
 function loading() {
@@ -173,7 +233,12 @@ async function render() {
     await renderer();
     content.focus();
   } catch (error) {
-    content.innerHTML = `<div class="panel"><div class="empty"><strong>Could not load this view</strong>${escapeHtml(error.message)}</div></div>`;
+    content.innerHTML = `<div class="panel"><div class="empty">
+      <strong>Could not load this view</strong>
+      <span>${escapeHtml(error.message)}</span>
+      <button id="retry-view" class="button primary small" type="button">Retry</button>
+    </div></div>`;
+    $("#retry-view")?.addEventListener("click", () => render());
     toast(error.message, true);
   }
 }

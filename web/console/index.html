@@ -6,6 +6,7 @@
   <meta name="color-scheme" content="light">
   <title>Mecordxn8n Control Center</title>
   <link rel="stylesheet" href="/console/styles.css">
+  <link rel="stylesheet" href="/console/styles/v2.css">
 </head>
 <body>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
@@ -84,18 +85,36 @@
         <select id="workspace-select" aria-label="Workspace"></select>
       </div>
 
-      <nav id="nav" class="nav" aria-label="Primary">
-        <button data-view="overview" class="nav-item active"><span>Overview</span><kbd>1</kbd></button>
-        <button data-view="launch" class="nav-item"><span>Launch</span><kbd>2</kbd></button>
-        <button data-view="targets" class="nav-item"><span>Targets</span><kbd>3</kbd></button>
-        <button data-view="findings" class="nav-item"><span>Findings</span><kbd>4</kbd></button>
-        <button data-view="approvals" class="nav-item"><span>Approvals</span><kbd>5</kbd></button>
-        <button data-view="pipeline" class="nav-item"><span>Pipeline</span><kbd>6</kbd></button>
-        <button data-view="operations" class="nav-item"><span>Operations</span><kbd>7</kbd></button>
-        <button data-view="integrations" class="nav-item"><span>Integrations</span><kbd>8</kbd></button>
-        <button data-view="team" class="nav-item"><span>Team & Access</span><kbd>9</kbd></button>
-        <button data-view="audit" class="nav-item"><span>Audit</span></button>
-        <button id="operator-nav" data-view="operator" class="nav-item hidden"><span>Operator</span></button>
+      <nav id="nav" class="nav nav-v2" aria-label="Primary">
+        <div class="nav-section">
+          <span class="nav-label">Home</span>
+          <button data-view="overview" data-route="/console/home" class="nav-item active"><span>Home</span><kbd>1</kbd></button>
+          <button data-view="launch" data-route="/console/launch" class="nav-item"><span>Launch</span></button>
+        </div>
+        <div class="nav-section">
+          <span class="nav-label">Engineering</span>
+          <button data-view="targets" data-route="/console/targets" class="nav-item"><span>Targets</span><kbd>2</kbd></button>
+          <button data-view="findings" data-route="/console/findings" class="nav-item"><span>Findings</span><kbd>3</kbd></button>
+          <button data-view="operations" data-route="/console/runs" class="nav-item"><span>Runs</span><kbd>4</kbd></button>
+        </div>
+        <div class="nav-section">
+          <span class="nav-label">Repair</span>
+          <button data-view="approvals" data-route="/console/approvals" class="nav-item"><span>Approval inbox</span><kbd>5</kbd></button>
+        </div>
+        <div class="nav-section">
+          <span class="nav-label">Revenue</span>
+          <button data-view="pipeline" data-route="/console/revenue" class="nav-item"><span>Opportunities</span><kbd>6</kbd></button>
+        </div>
+        <div class="nav-section">
+          <span class="nav-label">Workspace</span>
+          <button data-view="integrations" data-route="/console/integrations" class="nav-item"><span>Integrations</span><kbd>7</kbd></button>
+          <button data-view="team" data-route="/console/workspace/access" class="nav-item"><span>Team & Access</span><kbd>8</kbd></button>
+          <button data-view="audit" data-route="/console/workspace/audit" class="nav-item"><span>Audit</span><kbd>9</kbd></button>
+        </div>
+        <div class="nav-section operator-section">
+          <span class="nav-label">Platform</span>
+          <button id="operator-nav" data-view="operator" data-route="/console/operator" class="nav-item hidden"><span>Operator</span></button>
+        </div>
       </nav>
 
       <div class="sidebar-foot">
@@ -105,12 +124,16 @@
     </aside>
 
     <section class="main">
-      <header class="topbar">
-        <div>
-          <p id="view-kicker" class="eyebrow">WORKSPACE</p>
-          <h1 id="view-title">Overview</h1>
+      <header class="topbar topbar-v2">
+        <div class="page-context">
+          <div id="breadcrumb" class="breadcrumb">Workspace / Home</div>
+          <div class="title-row">
+            <p id="view-kicker" class="eyebrow">WORKSPACE</p>
+            <h1 id="view-title">Home</h1>
+          </div>
         </div>
         <div class="top-actions">
+          <button id="command-button" class="button command-button" type="button" aria-label="Open command palette">Search <kbd>⌘K</kbd></button>
           <span id="connection-badge" class="status-pill good">Control API online</span>
           <button id="refresh-button" class="button subtle">Refresh</button>
           <button id="primary-action" class="button primary">Add target</button>
@@ -125,6 +148,17 @@
       <header><div><p id="modal-kicker" class="eyebrow">ACTION</p><h2 id="modal-title"></h2></div><button value="cancel" class="icon-button" aria-label="Close">×</button></header>
       <div id="modal-content" class="modal-content"></div>
     </form>
+  </dialog>
+
+  <dialog id="command-palette" class="command-palette">
+    <div class="command-shell">
+      <div class="command-search">
+        <span aria-hidden="true">⌕</span>
+        <input id="command-query" type="search" placeholder="Jump to a page or action…" autocomplete="off" aria-label="Command search">
+        <kbd>Esc</kbd>
+      </div>
+      <div id="command-results" class="command-results" role="listbox"></div>
+    </div>
   </dialog>
 
   <script type="module" src="/console/app.js"></script>

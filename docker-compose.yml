@@ -45,6 +45,23 @@ services:
         condition: service_started
     command: node src/workers/http-observer-service.js
 
+  browser-qa:
+    build:
+      context: .
+      dockerfile: Dockerfile.browser
+    restart: unless-stopped
+    environment:
+      MECORDXN8N_CONTROL_API_URL: http://control-api:8080
+      WORKER_TOKEN: ${WORKER_TOKEN}
+      WORKER_TRIGGER_TOKEN: ${WORKER_TRIGGER_TOKEN}
+      WORKER_ID: browser-qa-worker
+      WORKER_PORT: 8091
+    depends_on:
+      control-api:
+        condition: service_started
+    command: node src/workers/browser-qa-service.js
+    shm_size: "512mb"
+
   n8n:
     image: docker.n8n.io/n8nio/n8n:latest
     restart: unless-stopped
@@ -65,6 +82,7 @@ services:
       MECORDXN8N_CONTROL_API_URL: ${MECORDXN8N_CONTROL_API_URL:-http://control-api:8080}
       MECORDXN8N_ORCHESTRATOR_TOKEN: ${MECORDXN8N_ORCHESTRATOR_TOKEN}
       MECORDXN8N_HTTP_OBSERVER_URL: ${MECORDXN8N_HTTP_OBSERVER_URL:-http://http-observer:8090}
+      MECORDXN8N_BROWSER_QA_URL: ${MECORDXN8N_BROWSER_QA_URL:-http://browser-qa:8091}
       MECORDXN8N_WORKER_TRIGGER_TOKEN: ${MECORDXN8N_WORKER_TRIGGER_TOKEN}
     depends_on:
       postgres:
@@ -72,6 +90,8 @@ services:
       control-api:
         condition: service_started
       http-observer:
+        condition: service_started
+      browser-qa:
         condition: service_started
     ports:
       - "127.0.0.1:5678:5678"

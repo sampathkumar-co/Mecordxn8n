@@ -40,6 +40,7 @@ import {
   getWorkspaceLaunchHealth,
   getWorkspaceOnboarding,
   hasVerifiedDomain,
+  blockFailedOnboardingAssessments,
   claimOnboardingReadyForReport,
   failOnboardingFinalization,
   listTargetAuthorizationCenter,
@@ -673,6 +674,7 @@ export async function handleMilestoneHPlatformRoute({
 
 export async function runMilestoneHMaintenance(limit = 25) {
   await purgePublicRateLimits();
+  const blockedAssessments = await blockFailedOnboardingAssessments(limit);
   const candidates = await claimOnboardingReadyForReport(limit);
   const results = [];
   const failures = [];
@@ -712,6 +714,7 @@ export async function runMilestoneHMaintenance(limit = 25) {
     }
   }
   return {
+    blockedAssessments,
     claimed: candidates.length,
     finalized: results.length,
     failed: failures.length,

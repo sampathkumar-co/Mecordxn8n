@@ -10,7 +10,7 @@ function requireStripeSecret() {
   const value = String(process.env.STRIPE_SECRET_KEY || "").trim();
   if (!value) {
     const error = new Error("Stripe billing is not configured");
-    error.statusCode = 503;
+    error.statusCode = 424;
     error.code = "BILLING_NOT_CONFIGURED";
     throw error;
   }
@@ -21,7 +21,7 @@ function requireAppUrl() {
   const value = String(process.env.PUBLIC_APP_URL || "").trim().replace(/\/+$/, "");
   if (!/^https:\/\//i.test(value)) {
     const error = new Error("PUBLIC_APP_URL must be configured with HTTPS");
-    error.statusCode = 503;
+    error.statusCode = 424;
     error.code = "PUBLIC_APP_URL_NOT_CONFIGURED";
     throw error;
   }
@@ -61,7 +61,7 @@ export function priceIdForPlan(plan) {
   const value = envName ? String(process.env[envName] || "").trim() : "";
   if (!envName || !value) {
     const error = new Error("billing price is not configured for plan");
-    error.statusCode = 503;
+    error.statusCode = 424;
     error.code = "BILLING_PRICE_NOT_CONFIGURED";
     throw error;
   }
@@ -75,6 +75,7 @@ export async function createStripeCheckout({
   customerId = null,
   fetchImpl = fetch,
 }) {
+  requireStripeSecret();
   const appUrl = requireAppUrl();
   const params = {
     mode: "subscription",
@@ -106,6 +107,7 @@ export async function createStripePortal({
   customerId,
   fetchImpl = fetch,
 }) {
+  requireStripeSecret();
   const appUrl = requireAppUrl();
   if (!customerId) {
     const error = new Error("workspace has no Stripe customer");

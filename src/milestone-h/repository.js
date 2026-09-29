@@ -692,6 +692,27 @@ export async function completeBillingCheckout({
   }
 }
 
+export async function reconcileBillingInvoice({
+  customerId = null,
+  subscriptionId = null,
+  paid,
+}) {
+  if (!customerId && !subscriptionId) return null;
+  const result = await pool.query(
+    `UPDATE workspace_subscriptions
+        SET status = CASE WHEN $3::boolean THEN 'ACTIVE' ELSE 'PAST_DUE' END,
+            updated_at = now()
+      WHERE (
+        $1::text IS NOT NULL AND external_customer_id = $1
+      ) OR (
+        $2::text IS NOT NULL AND external_subscription_id = $2
+      )
+      RETURNING *`,
+    [customerId, subscriptionId, Boolean(paid)],
+  );
+  return result.rows[0] || null;
+}
+
 export async function getWorkspaceLaunchHealth(workspaceId) {
   const [jobs, monitors, integrations, approvals, regressions] = await Promise.all([
     pool.query(

@@ -653,3 +653,88 @@ test(
     assert.equal(fetched.body.state, "DEAD_LETTER");
   },
 );
+
+test(
+  "expired approvals and revoked authorizations fail closed",
+  { skip: !enabled },
+  async () => {
+    const host = "fail-closed-b.example.com";
+    const target = await request("/v1/targets", {
+      method: "POST",
+      body: {
+        organizationName: "Fail Closed B",
+        baseUrl: `https://${host}`,
+        authorization: {
+          mode: "PUBLIC_QA_ONLY",
+          allowedHosts: [host],
+        },
+      },
+    });
+    assert.equal(target.status, 201);
+
+    const report = await request(`/v1/targets/${target.body.id}/reports`, {
+      method: "POST",
+      body: {},
+    });
+    assert.equal(report.status, 201);
+
+    const release = await request(
+      `/v1/reports/${report.body.id}/request-release`,
+      {
+        method: "POST",
+        body: { requestedBy: "expiry-test" },
+      },
+    );
+    assert.equal(release.status, 202);
+
+    await pool.query(
+      "UPDATE approval_requests SET expires_at = now() - interval '1 second' WHERE id = $1",
+      [release.body.approval.id],
+    );
+
+    const expired = await request(
+      `/v1/approvals/${release.body.approval.id}/approve`,
+      {
+        method: "POST",
+        body: { decidedBy: "late-human" },
+      },
+    );
+    assert.equal(expired.status, 409);
+    assert.equal(expired.body.error, "APPROVAL_EXPIRED");
+
+    const reportAfter = await request(`/v1/reports/${report.body.id}`);
+    assert.equal(reportAfter.body.status, "READY");
+
+    const queued = await request("/v1/jobs", {
+      method: "POST",
+      body: {
+        targetId: target.body.id,
+        jobType: "revocation-test",
+        capability: CAPABILITIES.PUBLIC_HTTP_OBSERVE,
+        requestedUrl: `https://${host}/`,
+        maxAttempts: 1,
+        input: {},
+      },
+    });
+    assert.equal(queued.status, 201);
+
+    await pool.query(
+      "UPDATE authorizations SET revoked_at = now() WHERE target_id = $1 AND revoked_at IS NULL",
+      [target.body.id],
+    );
+
+    const maintenance = await request("/v1/monitoring/tick", {
+      method: "POST",
+      body: { limit: 10 },
+    });
+    assert.equal(maintenance.status, 200);
+    assert.ok(maintenance.body.cancelledForAuthorization >= 1);
+
+    const cancelled = await request(`/v1/jobs/${queued.body.id}`);
+    assert.equal(cancelled.body.state, "CANCELLED");
+    assert.equal(
+      cancelled.body.error.code,
+      "AUTHORIZATION_NO_LONGER_VALID",
+    );
+  },
+);

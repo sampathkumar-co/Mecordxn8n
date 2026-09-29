@@ -95,5 +95,8 @@ test("repair pattern key is stable for the same symptom", () => {
     outcome: "SUCCESS",
   });
   assert.equal(learning.outcome, "SUCCESS");
-  assert.ok(learning.successfulStrategy.mcpResult.includes("fixed"));
+  assert.equal(learning.successfulStrategy.source, "verified-remediation");
+  assert.equal(learning.lessons.rawClientDataStored, false);
+  assert.match(learning.symptomSignature, /^sha256:/);
+  assert.equal(JSON.stringify(learning).includes("fixed and tested"), false);
 });

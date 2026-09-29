@@ -107,6 +107,7 @@ export async function runRemediationOnce({
         remediationRequestId: remediationRecord.id,
         findingId: finding.id,
         learning,
+        workerId,
       });
     }
 
@@ -163,6 +164,7 @@ export async function runRemediationOnce({
           remediationRequestId: remediationRecord.id,
           findingId: finding.id,
           learning,
+          workerId,
         }).catch(() => {});
       }
     }

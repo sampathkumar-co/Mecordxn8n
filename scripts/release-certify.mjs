@@ -30,6 +30,8 @@ const requiredFiles = [
   "web/console/styles/v2.css",
   "web/console/views/finding-detail.js",
   "web/console/views/home.js",
+  "web/console/views/approval-detail.js",
+  "web/console/views/approvals.js",
   "web/console/components/evidence.js",
   "web/console/core/router.js",
 ];

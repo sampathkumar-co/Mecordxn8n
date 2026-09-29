@@ -40,6 +40,7 @@ import {
   getWorkspace,
   getWorkspaceFinding,
   getWorkspaceJobSummary,
+  getWorkspaceRepairSummary,
   getWorkspaceOverview,
   getWorkspaceSubscription,
   listUserWorkspaces,
@@ -50,6 +51,7 @@ import {
   listWorkspaceMembers,
   listWorkspaceOperations,
   listWorkspacePipeline,
+  listWorkspaceRepairs,
   listWorkspaceTargets,
   purgeExpiredWorkspaceData,
   removeWorkspaceMember,
@@ -790,6 +792,37 @@ export async function handlePlatformRoute({
         url.searchParams.get("limit") || 100,
       ),
     );
+  }
+
+  match = url.pathname.match(
+    /^\/v1\/platform\/workspaces\/([0-9a-f-]+)\/repairs$/i,
+  );
+  if (req.method === "GET" && match) {
+    await requireWorkspace(principal, match[1], {
+      minimumRole: "VIEWER",
+      apiScope: "workspace:read",
+    });
+    return json(
+      res,
+      200,
+      await listWorkspaceRepairs(
+        match[1],
+        url.searchParams.get("limit") || 100,
+      ),
+    );
+  }
+
+  match = url.pathname.match(
+    /^\/v1\/platform\/workspaces\/([0-9a-f-]+)\/repairs\/([0-9a-f-]+)$/i,
+  );
+  if (req.method === "GET" && match) {
+    await requireWorkspace(principal, match[1], {
+      minimumRole: "VIEWER",
+      apiScope: "workspace:read",
+    });
+    const repair = await getWorkspaceRepairSummary(match[1], match[2]);
+    if (!repair) return json(res, 404, { error: "REPAIR_NOT_FOUND" });
+    return json(res, 200, repair);
   }
 
   match = url.pathname.match(

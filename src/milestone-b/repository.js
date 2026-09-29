@@ -1,4 +1,5 @@
 import { pool } from "../repository.js";
+import { enqueueTargetIntegrationEvent } from "../integrations/repository.js";
 import {
   compareSnapshots,
   monitoringFailureFingerprint,
@@ -95,7 +96,21 @@ export async function createApprovalRequest({
       safeMinutes,
     ],
   );
-  return mapApproval(result.rows[0]);
+  const approval = mapApproval(result.rows[0]);
+  await enqueueTargetIntegrationEvent({
+    targetId,
+    eventType: "approval.pending",
+    payload: {
+      approvalId: approval.id,
+      actionType: approval.actionType,
+      findingId: approval.findingId,
+      reportId: approval.reportId,
+      commercialActionId: approval.commercialActionId,
+      expiresAt: approval.expiresAt,
+    },
+    idempotencyKey: `approval.pending:${approval.id}`,
+  });
+  return approval;
 }
 
 export async function getApprovalRequest(approvalId) {
@@ -412,7 +427,7 @@ export async function recordMonitoringRunFromLease({
 
     if (regressions.length > 0) {
       for (const regression of regressions) {
-        await client.query(
+        const regressionRow = await client.query(
           `INSERT INTO regressions (
              policy_id, monitoring_run_id, fingerprint,
              category, severity, summary, evidence
@@ -424,7 +439,8 @@ export async function recordMonitoringRunFromLease({
              severity = EXCLUDED.severity,
              summary = EXCLUDED.summary,
              evidence = EXCLUDED.evidence,
-             created_at = now()`,
+             created_at = now()
+           RETURNING id`,
           [
             policyId,
             run.id,
@@ -435,6 +451,19 @@ export async function recordMonitoringRunFromLease({
             JSON.stringify(regression.evidence || {}),
           ],
         );
+        await enqueueTargetIntegrationEvent({
+          client,
+          targetId: job.target_id,
+          eventType: "regression.opened",
+          payload: {
+            regressionId: regressionRow.rows[0].id,
+            policyId,
+            monitoringRunId: run.id,
+            category: regression.category,
+            severity: regression.severity,
+          },
+          idempotencyKey: `regression.opened:${regressionRow.rows[0].id}`,
+        });
       }
     }
 

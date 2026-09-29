@@ -276,3 +276,109 @@ Production operators should store database dumps and the artifact volume in a se
 ### Production prerequisites
 
 The repository can certify the software and deployment definition, but it cannot manufacture live production credentials or customer accounts. A real deployment still requires operator-provided secrets/infrastructure such as PostgreSQL credentials, n8n encryption key, platform master/bootstrap keys, Mecord MCP credentials, DNS/TLS/reverse proxy configuration, backup storage, and any GitHub/Slack/Stripe/webhook credentials selected by a workspace.
+
+
+## Milestone H — production launch and revenue activation
+
+Milestone H turns the certified engineering platform into a customer-operable launch flow.
+
+### Self-serve first value
+
+A new customer can now:
+
+```text
+sign up
+  → 14-day Team trial
+  → register a non-destructive target
+  → run authorized HTTP / browser QA
+  → receive a first READY report
+  → request human report release
+  → create an expiring secure share link
+```
+
+The Control Center has a dedicated **Launch** view with the onboarding checklist, subscription state, workspace health, billing entry points, ownership verification and first-assessment actions.
+
+Self-serve target registration intentionally cannot start in `CLIENT_AUTHORIZED` mode and cannot request `SOURCE_REMEDIATION`. Those privileges are enabled only through the Authorization Center after target-domain ownership is verified.
+
+### Ownership and authorization center
+
+For a target, an ADMIN can create a short-lived DNS TXT challenge:
+
+- record name: `_mecordxn8n.<target-host>`
+- value: the generated `mecordxn8n-verification=...` challenge
+- challenge lifetime: 30 minutes
+
+After the DNS proof succeeds, the workspace may replace the target authorization with a bounded `CLIENT_AUTHORIZED` grant and explicitly include source-remediation capability.
+
+Authorization history remains visible. Revoking the active authorization also cancels queued/running jobs and clears their leases.
+
+DNS ownership is an additional trust signal for self-serve privileged access; it does not replace the existing requirement for a verified finding, explicit source-remediation capability, human approval and current authorization before remediation execution.
+
+### Billing and trials
+
+Self-serve signup creates a 14-day Team trial. Operational write scopes fail closed after the trial expires or when Stripe marks the workspace `PAST_DUE` / cancelled. Read-only product access and billing access remain available so the owner can inspect the account and recover billing.
+
+Stripe Checkout and Customer Portal are Stripe-hosted. Payment-card data does not pass through the Mecordxn8n Control API.
+
+Supported launch billing events include:
+
+- Checkout completion
+- subscription create/update/delete
+- invoice payment success
+- invoice payment failure
+
+The billing endpoints remain unavailable with a safe dependency/configuration response until production Stripe keys and price IDs are supplied.
+
+### First-assessment finalization
+
+The first assessment uses only capabilities that are already authorized for the target. It never adds source access.
+
+The inactive-on-import n8n `onboarding-finalization.json` workflow calls the Control API once per minute. The Control API atomically claims completed onboarding assessments with `FOR UPDATE SKIP LOCKED`, generates at most one initial client report, retries bounded finalization failures and blocks after repeated failures.
+
+Generated reports are `READY`, not externally released. External sharing still requires the canonical human `REPORT_RELEASE` approval.
+
+### Secure report sharing
+
+Only an `APPROVED` report can receive a public share token.
+
+Share tokens:
+
+- are random and returned only at creation time;
+- are stored only as SHA-256 hashes;
+- have bounded expiry;
+- can be revoked immediately;
+- stop working if the report is no longer approved.
+
+Public share access exposes the approved report, not workspace authorization evidence, credentials or private MCP/source data.
+
+### Customer and operator health
+
+Each workspace exposes a customer-facing health summary covering:
+
+- recent job states;
+- failing monitors;
+- integration delivery states/dead letters;
+- pending approvals;
+- open regressions.
+
+A separate platform-operator view provides fleet-level workspace/subscription counts and active operational alerts. Ordinary workspace ownership does not imply platform-operator access.
+
+### Production deployment
+
+The repository includes:
+
+- `docker-compose.production.yml` — production overlay;
+- `deploy/Caddyfile` — automatic TLS and reverse proxy for the app and n8n;
+- `npm run production:preflight` — rejects missing/placeholder/short production secrets and invalid domain configuration;
+- `npm run production:smoke` — verifies public liveness, database readiness and the Control Center after deployment.
+
+Typical production validation:
+
+```bash
+npm run production:preflight
+docker compose -f docker-compose.yml -f docker-compose.production.yml config
+docker compose -f docker-compose.yml -f docker-compose.production.yml up -d
+npm run production:smoke
+```
+
+Production deployment still requires operator-provided DNS, reachable infrastructure, strong secrets, database credentials, backup storage, and any selected Stripe/Mecord/provider credentials. Repository certification does not claim those external systems have been provisioned.

@@ -389,7 +389,7 @@ export async function replaceTargetAuthorization({
        VALUES (
          $1,$2,'TARGET_AUTHORIZATION_REPLACED','WARN',
          jsonb_build_object(
-           'targetId',$3,'authorizationId',$4,'mode',$5
+           'targetId',$3::text,'authorizationId',$4::text,'mode',$5::text
          )
        )`,
       [workspaceId, actorUserId, targetId, result.rows[0].id, mode],
@@ -445,7 +445,7 @@ export async function revokeTargetAuthorization({
        )
        VALUES (
          $1,$2,'TARGET_AUTHORIZATION_REVOKED','WARN',
-         jsonb_build_object('targetId',$3,'revokedCount',$4)
+         jsonb_build_object('targetId',$3::text,'revokedCount',$4::int)
        )`,
       [workspaceId, actorUserId, targetId, result.rowCount],
     );

@@ -39,6 +39,7 @@ import {
   deleteWorkspace,
   getWorkspace,
   getWorkspaceFinding,
+  getWorkspaceJobSummary,
   getWorkspaceOverview,
   getWorkspaceSubscription,
   listUserWorkspaces,
@@ -758,6 +759,19 @@ export async function handlePlatformRoute({
         url.searchParams.get("limit") || 100,
       ),
     });
+  }
+
+  match = url.pathname.match(
+    /^\/v1\/platform\/workspaces\/([0-9a-f-]+)\/jobs\/([0-9a-f-]+)$/i,
+  );
+  if (req.method === "GET" && match) {
+    await requireWorkspace(principal, match[1], {
+      minimumRole: "VIEWER",
+      apiScope: "workspace:read",
+    });
+    const job = await getWorkspaceJobSummary(match[1], match[2]);
+    if (!job) return json(res, 404, { error: "JOB_NOT_FOUND" });
+    return json(res, 200, job);
   }
 
   match = url.pathname.match(

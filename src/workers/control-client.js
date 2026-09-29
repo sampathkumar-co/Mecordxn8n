@@ -165,3 +165,82 @@ export function recordRemediationResult({
     { workerId, status, mcpRequestId, mcpResult },
   );
 }
+
+export function heartbeatJob({
+  controlApiUrl,
+  workerToken,
+  jobId,
+  workerId,
+  leaseSeconds = 120,
+}) {
+  return workerApiRequest(
+    controlApiUrl,
+    workerToken,
+    `/v1/worker/jobs/${jobId}/heartbeat`,
+    { workerId, leaseSeconds },
+  );
+}
+
+export function recordMonitoringRun({
+  controlApiUrl,
+  workerToken,
+  jobId,
+  workerId,
+  policyId,
+  snapshot,
+  costUnits,
+}) {
+  return workerApiRequest(
+    controlApiUrl,
+    workerToken,
+    `/v1/worker/milestone-b/jobs/${jobId}/monitoring-run`,
+    { workerId, policyId, snapshot, costUnits },
+  );
+}
+
+export function recordMonitoringFailure({
+  controlApiUrl,
+  workerToken,
+  jobId,
+  policyId,
+  targetId,
+  error,
+  workerId,
+}) {
+  return workerApiRequest(
+    controlApiUrl,
+    workerToken,
+    `/v1/worker/milestone-b/jobs/${jobId}/monitoring-failure`,
+    { policyId, targetId, error, workerId },
+  );
+}
+
+export function recordRepairOutcome({
+  controlApiUrl,
+  workerToken,
+  jobId,
+  remediationRequestId,
+  findingId,
+  learning,
+  workerId,
+}) {
+  return workerApiRequest(
+    controlApiUrl,
+    workerToken,
+    `/v1/worker/milestone-b/jobs/${jobId}/repair-outcome`,
+    { remediationRequestId, findingId, learning, workerId },
+  );
+}
+
+export function getRepairPatterns({
+  controlApiUrl,
+  workerToken,
+  category,
+  limit = 5,
+}) {
+  return workerApiGet(
+    controlApiUrl,
+    workerToken,
+    `/v1/worker/milestone-b/repair-patterns?category=${encodeURIComponent(category)}&limit=${limit}`,
+  );
+}

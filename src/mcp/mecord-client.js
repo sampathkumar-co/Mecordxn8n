@@ -76,11 +76,12 @@ export class MecordMcpClient {
     return response?.result ?? response;
   }
 
-  async submitRemediation({ finding, projectRoot }) {
+  async submitRemediation({ finding, projectRoot, repairPatterns = [] }) {
     const requestId = randomUUID();
     const objective =
       `Diagnose and remediate the verified website defect "${finding.title}" affecting ${finding.affectedUrl}. ` +
-      "Inspect the existing project before changes, reuse canonical architecture, make the smallest safe fix, and run available quality gates.";
+      "Inspect the existing project before changes, reuse canonical architecture, make the smallest safe fix, and run available quality gates. " +
+      "Previously successful repair patterns may be supplied as non-authoritative hints; verify them against the current project before reuse.";
 
     const result = await this.callTool(
       process.env.MECORD_MCP_REMEDIATION_TOOL || "operations",
@@ -100,6 +101,7 @@ export class MecordMcpClient {
           "Do not contact third parties or perform external side effects.",
         ],
         projectRoot,
+        priorRepairPatterns: repairPatterns.slice(0, 5),
         finding: {
           id: finding.id,
           category: finding.category,

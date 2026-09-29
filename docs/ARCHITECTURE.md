@@ -149,3 +149,42 @@ Screenshots live in the shared `artifacts_data` Docker volume. n8n mounts this v
 ## Next trust transition
 
 A finding should not be handed to remediation simply because it was observed once. The next module introduces independent verification with fresh execution context and evidence comparison. Only verified findings become eligible for authorized Mecord remediation.
+
+
+## Milestone B production control plane
+
+### Approval boundary
+
+`SOURCE_REMEDIATION` is a two-gate capability:
+
+1. target authorization must be `CLIENT_AUTHORIZED` and explicitly grant `SOURCE_REMEDIATION`;
+2. a non-expired human approval request must be approved.
+
+The generic job-ingress endpoint rejects direct source-remediation jobs. Approval execution re-checks the current authorization before queueing work.
+
+### Queue reliability
+
+Workers lease jobs with bounded ownership. The queue:
+
+- re-checks authorization at lease time,
+- serializes active work per target,
+- retries failures with bounded exponential backoff,
+- renews long operations with heartbeats,
+- dead-letters exhausted jobs,
+- cancels queued jobs whose authorization is revoked or expires.
+
+Worker-originated evidence, monitoring, and learning writes require the caller to own the active lease and are bound to the IDs recorded in that job's input.
+
+### Continuous monitoring
+
+The maintenance tick atomically claims due monitoring policies. A monitor job uses the ordinary authorized HTTP/browser capability; there is no separate bypass capability.
+
+Normalized snapshots deliberately contain bounded health signals rather than full page/session content. Regressions are opened only for deterioration from the previous successful snapshot and resolved after recovery.
+
+### Repair intelligence isolation
+
+Cross-client repair memory stores non-reversible symptom signatures and structural success metadata only. Raw MCP results remain attached to the original remediation request and do not enter the reusable pattern table.
+
+### Operational visibility
+
+`operational_events` stores bounded system events such as dead letters, monitor failures, regression detection, budget skips, and queue failures. `daily_usage` records per-target cost units for budget/operations reporting.

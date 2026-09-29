@@ -5,10 +5,13 @@ import net from "node:net";
 import { createHash } from "node:crypto";
 
 import { CAPABILITIES } from "../authorization.js";
+import { normalizeMonitoringSnapshot } from "../milestone-b/regression.js";
 import {
   completeJob,
   leaseJob,
   recordFinding,
+  recordMonitoringFailure,
+  recordMonitoringRun,
 } from "./control-client.js";
 
 const DEFAULT_USER_AGENT = "Mecordxn8n-Public-QA/0.1";
@@ -205,6 +208,22 @@ export async function runPublicHttpObserverOnce({
       });
     }
 
+    let monitoring = null;
+    if (job.input?.monitoringPolicyId) {
+      monitoring = await recordMonitoringRun({
+        controlApiUrl,
+        workerToken,
+        jobId: job.id,
+        workerId,
+        policyId: job.input.monitoringPolicyId,
+        snapshot: normalizeMonitoringSnapshot(
+          CAPABILITIES.PUBLIC_HTTP_OBSERVE,
+          observation,
+        ),
+        costUnits: 0.25,
+      });
+    }
+
     const completed = await completeJob({
       controlApiUrl,
       workerToken,
@@ -214,6 +233,7 @@ export async function runPublicHttpObserverOnce({
       output: {
         observation,
         findingRecorded: Boolean(finding),
+        monitoring,
       },
     });
 
@@ -223,6 +243,23 @@ export async function runPublicHttpObserverOnce({
       job: completed,
     };
   } catch (error) {
+    const finalAttempt =
+      Number(job.attemptCount || 0) >= Number(job.maxAttempts || 3);
+    if (job.input?.monitoringPolicyId && finalAttempt) {
+      await recordMonitoringFailure({
+        controlApiUrl,
+        workerToken,
+        jobId: job.id,
+        policyId: job.input.monitoringPolicyId,
+        targetId: job.targetId,
+        workerId,
+        error: {
+          code: error.code || "OBSERVATION_FAILED",
+          message: error.message,
+        },
+      }).catch(() => {});
+    }
+
     try {
       await completeJob({
         controlApiUrl,

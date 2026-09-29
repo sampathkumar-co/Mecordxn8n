@@ -4,101 +4,127 @@ Mecord × n8n is an authorization-gated **Problem → Proof → Repair → Reven
 
 ## Runtime split
 
-- **n8n** — schedules, retries, durable orchestration, and integration workflows.
-- **Control API + PostgreSQL** — authorization, targets, jobs, leases, findings, verification, evidence, opportunity intelligence, remediation state, reports, and audit history.
-- **Browser/HTTP workers** — bounded public QA execution.
+- **n8n** — durable schedules, retries, maintenance ticks, and cross-service orchestration.
+- **Control API + PostgreSQL** — authorization, jobs, leases, approvals, monitoring, findings, verification, evidence, repair intelligence, reports, budgets, and audit/operational history.
+- **Browser/HTTP workers** — bounded public QA and continuous monitoring execution.
 - **Mecord Connect MCP** — client-authorized source remediation.
-- **ChatGPT** — architecture, debugging, implementation decisions, review, and further engineering.
+- **ChatGPT** — architecture, debugging, implementation, review, and further engineering.
 
 ## Milestone A — revenue-capable MVP
 
-Milestone A is implemented on `build/milestone-a`.
+Milestone A provides the initial target → finding → verification → opportunity → proposal → authorized remediation flow:
 
-### 1. Authorization and target registry
+- exact-host authorization registry,
+- public HTTP and safe Playwright QA,
+- site discovery,
+- read-only journeys,
+- finding deduplication,
+- independent verification,
+- evidence artifacts,
+- business-impact/opportunity scoring,
+- Mecord MCP remediation bridge,
+- client proposal generation.
 
-Every target is one of:
+## Milestone B — production hardening
 
-- `PUBLIC_QA_ONLY`
-- `BUG_BOUNTY`
-- `CLIENT_AUTHORIZED`
-- `DO_NOT_TEST`
+Milestone B adds the operational controls required to run that loop continuously.
 
-Capabilities, exact hosts, and expiry are enforced in code. `SOURCE_REMEDIATION` requires `CLIENT_AUTHORIZED`.
+### Human approval gates
 
-### 2. Site intake and discovery
+Source remediation can no longer be queued through the generic job endpoint.
 
-`SITE_DISCOVERY` performs a non-interactive browser load and records a bounded same-origin page inventory. It does not crawl arbitrary external domains.
+The supported path is:
 
-### 3. Public QA
+```text
+VERIFIED finding
+      ↓
+request remediation
+      ↓
+PENDING approval
+      ↓
+explicit human APPROVE / REJECT
+      ↓
+re-check current target authorization
+      ↓
+queue SOURCE_REMEDIATION
+```
 
-Implemented workers include:
+Approval requests expire and are idempotent. Replaying an already approved remediation request does not create another job. Client reports use the same release-approval mechanism and remain local until explicitly approved.
 
-- `PUBLIC_HTTP_OBSERVE`
-- `BROWSER_QA`
-- `SITE_DISCOVERY`
-- `JOURNEY_QA`
+### Continuous regression monitoring
 
-Browser execution blocks mutation methods, private/reserved destinations, non-web ports, service workers, downloads, popups, and out-of-scope top-level navigation. Screenshots and bounded runtime/network/rendering evidence are stored for later verification/reporting.
+A target can have recurring HTTP or browser monitoring policies with:
 
-### 4. Read-only journey QA
+- exact authorized URL,
+- cadence from 5 minutes to 7 days,
+- bounded input,
+- daily cost-unit budget,
+- enabled/disabled state,
+- durable next/last run timestamps.
 
-A journey is a bounded sequence of same-origin page loads with status/title assertions. Public QA journeys intentionally do not click, type, authenticate, or submit forms.
+n8n runs the production maintenance workflow every five minutes. Due policies are claimed atomically with `FOR UPDATE SKIP LOCKED`, so concurrent ticks cannot queue the same monitor twice.
 
-### 5. Finding intelligence
+The first successful run creates a baseline. Later runs compare normalized snapshots and open regressions for:
 
-Findings are fingerprinted and deduplicated. Runtime-error fingerprints cluster identical error signatures across pages on the same host. Verified findings receive deterministic:
+- HTTP/page availability changes,
+- major latency/load-duration increases,
+- new runtime errors,
+- new failed requests,
+- new broken images,
+- new horizontal overflow.
 
-- business-impact score,
-- buyer relevance,
-- repair feasibility,
-- engineering effort,
-- opportunity score,
-- impact tier,
-- affected journey classification.
+A healthy later snapshot resolves open regressions.
 
-Scores are explicitly directional and do not claim access to private revenue or conversion data.
+### Repair intelligence
 
-### 6. Independent verification + evidence
+Successful authorized remediations update a reusable repair-pattern store containing:
 
-`FINDING_VERIFY` reruns a finding from fresh executions. The default gate requires two matching reproductions. Verification persists:
+- anonymized symptom hash,
+- category/root-cause class,
+- success/failure counts,
+- validation metadata,
+- structural result shape.
 
-- attempts and matches,
-- confidence,
-- evidence snapshots,
-- screenshot artifact metadata and SHA-256,
-- final `VERIFIED` or `NOT_REPRODUCED` state.
+Raw client MCP output, code, paths, URLs, and error text are not copied into cross-client repair memory.
 
-Only verified findings enter the opportunity/report/remediation funnel.
+When a future verified issue in the same category reaches remediation, up to five successful repair patterns are supplied to Mecord as **non-authoritative hints**. Mecord must still inspect the actual project and validate the repair.
 
-### 7. Mecord MCP remediation bridge
+### Reliability and failure containment
 
-Verified findings may be queued for `SOURCE_REMEDIATION` only when the target is explicitly client-authorized for that capability.
+Jobs now support:
 
-The remediation worker uses the configured Streamable HTTP MCP endpoint:
+- configurable 1–10 maximum attempts,
+- exponential retry backoff,
+- lease heartbeats,
+- dead-letter state after retry exhaustion,
+- authorization re-check at lease and heartbeat time,
+- cancellation of queued jobs after authorization expiry/revocation,
+- one active job per target,
+- worker-write lease ownership,
+- context binding between jobs and monitoring/repair records.
 
-- `MECORD_MCP_URL`
-- `MECORD_MCP_TOKEN`
-- `MECORD_MCP_REMEDIATION_TOOL` (default: `operations`)
+Long-running Mecord remediation heartbeats its lease every minute.
 
-It initializes an MCP session and submits a bounded remediation outcome containing the verified finding, authorized project root, success conditions, and prohibited scope.
+### Budgets and observability
 
-### 8. Opportunity and proposal engine
+Continuous monitors consume cost units. Policies stop queueing runs after their configured daily budget is reached.
 
-Verified findings can be retrieved in opportunity-score order. The report API generates a client proposal containing:
+Operational state is available at:
 
-- independently reproduced findings,
-- affected URLs,
-- evidence confidence,
-- directional impact assessment,
-- opportunity ranking,
-- remediation engagement steps,
-- authorization/safety scope.
+`GET /v1/ops/metrics`
 
-Reports are stored as `READY`; they are **not automatically sent** to third parties.
+including:
+
+- jobs by state,
+- pending approvals,
+- enabled/due monitors,
+- open regressions,
+- last-24-hour operational errors,
+- today's job count and cost units.
 
 ## n8n workflows
 
-Import the inactive workflow definitions under `n8n/workflows/`:
+Workflow JSON under `n8n/workflows/` includes:
 
 - job intake,
 - public HTTP dispatch,
@@ -106,9 +132,10 @@ Import the inactive workflow definitions under `n8n/workflows/`:
 - site discovery dispatch,
 - journey QA dispatch,
 - finding verification dispatch,
-- remediation dispatch.
+- remediation dispatch,
+- production maintenance tick.
 
-Review environment variables and target authorization before activation.
+Workflow definitions remain inactive on import. Review environment variables, authorization scope, cadence, and budgets before activating them.
 
 ## Local stack
 
@@ -117,22 +144,10 @@ cp .env.example .env
 docker compose up --build
 ```
 
-The MCP remediation worker requires a real authorized Mecord MCP endpoint before remediation jobs can succeed. Public QA, verification, scoring, and proposal generation do not require Mecord credentials.
+The remediation worker requires a real authorized Mecord Streamable HTTP MCP endpoint before source-remediation jobs can succeed.
 
-## Milestone A completion gate
+## Safety boundary
 
-The CI acceptance suite covers:
+Public QA remains non-interactive: no clicking, typing, form submission, login automation, destructive methods, non-web ports, private/reserved destinations, or out-of-scope navigation.
 
-- database migrations,
-- authorization boundaries,
-- worker leases,
-- finding persistence,
-- browser/egress safety,
-- MCP transport behavior,
-- opportunity scoring,
-- verified-finding lifecycle,
-- client proposal generation,
-- remediation queue authorization,
-- n8n workflow JSON validation,
-- Docker Compose validation,
-- browser worker image build.
+Security-capable work remains limited to explicitly authorized client/bounty scope. No proposal/report is automatically delivered to a third party.

@@ -19,6 +19,7 @@ import {
   upsertFindingFromLease,
 } from "./repository.js";
 import { handleMilestoneARoute } from "./milestone-a/routes.js";
+import { handleMilestoneBRoute } from "./milestone-b/routes.js";
 
 const MAX_BODY_BYTES = 256 * 1024;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -164,6 +165,10 @@ function normalizeJobInput(body) {
     capability: body.capability,
     requestedUrl: body.requestedUrl,
     input: body.input || {},
+    maxAttempts:
+      body.maxAttempts == null
+        ? 3
+        : Math.min(Math.max(Number(body.maxAttempts) || 3, 1), 10),
   };
 }
 
@@ -268,6 +273,16 @@ export function createServer({
         return json(res, 401, { error: "UNAUTHORIZED" });
       }
 
+      const milestoneBHandled = await handleMilestoneBRoute({
+        req,
+        res,
+        url,
+        json,
+        readJson,
+        badRequest,
+      });
+      if (milestoneBHandled !== false) return;
+
       const milestoneAHandled = await handleMilestoneARoute({
         req,
         res,
@@ -321,6 +336,12 @@ export function createServer({
 
       if (req.method === "POST" && url.pathname === "/v1/jobs") {
         const body = normalizeJobInput(await readJson(req));
+        if (body.capability === CAPABILITIES.SOURCE_REMEDIATION) {
+          return json(res, 403, {
+            error: "APPROVAL_REQUIRED",
+            message: "source remediation must be requested through the finding approval flow",
+          });
+        }
         const authorization = await getCurrentAuthorization(body.targetId);
 
         let decision;

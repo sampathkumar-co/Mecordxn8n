@@ -85,7 +85,7 @@ test(
 );
 
 test(
-  "client authorization can queue an explicitly granted capability",
+  "source remediation cannot bypass the human approval flow",
   { skip: !enabled },
   async () => {
     const targetResponse = await request("/v1/targets", {
@@ -116,8 +116,8 @@ test(
       }
     });
 
-    assert.equal(jobResponse.status, 201);
-    assert.equal(jobResponse.body.state, "QUEUED");
+    assert.equal(jobResponse.status, 403);
+    assert.equal(jobResponse.body.error, "APPROVAL_REQUIRED");
   },
 );
 

@@ -477,6 +477,21 @@ export async function setOnboardingReport({
   });
 }
 
+export async function reportBelongsToWorkspace({
+  workspaceId,
+  reportId,
+}) {
+  const result = await pool.query(
+    `SELECT r.id, r.target_id, r.status
+       FROM reports r
+       JOIN targets t ON t.id = r.target_id
+      WHERE r.id = $1
+        AND t.workspace_id = $2`,
+    [reportId, workspaceId],
+  );
+  return result.rows[0] || null;
+}
+
 export async function createReportShareLink({
   workspaceId,
   reportId,

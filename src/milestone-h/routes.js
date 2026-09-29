@@ -40,7 +40,8 @@ import {
   getWorkspaceLaunchHealth,
   getWorkspaceOnboarding,
   hasVerifiedDomain,
-  listOnboardingReadyForReport,
+  claimOnboardingReadyForReport,
+  failOnboardingFinalization,
   listTargetAuthorizationCenter,
   markOnboardingStep,
   recordBillingCheckout,
@@ -660,28 +661,44 @@ export async function handleMilestoneHPlatformRoute({
 
 export async function runMilestoneHMaintenance(limit = 25) {
   await purgePublicRateLimits();
-  const candidates = await listOnboardingReadyForReport(limit);
+  const candidates = await claimOnboardingReadyForReport(limit);
   const results = [];
+  const failures = [];
   for (const candidate of candidates) {
-    const target = await getTarget(candidate.primary_target_id);
-    if (!target) continue;
-    const findings = await listOpportunityFindings(target.id);
-    const proposal = buildClientProposal({ target, findings });
-    const report = await saveReport({
-      targetId: target.id,
-      kind: "CLIENT_PROPOSAL",
-      markdown: proposal.markdown,
-      summary: proposal.summary,
-    });
-    await setOnboardingReport({
-      workspaceId: candidate.workspace_id,
-      reportId: report.id,
-    });
-    results.push({
-      workspaceId: candidate.workspace_id,
-      targetId: target.id,
-      reportId: report.id,
-    });
+    try {
+      const target = await getTarget(candidate.primary_target_id);
+      if (!target) throw Object.assign(new Error("target missing"), { code: "TARGET_MISSING" });
+      const findings = await listOpportunityFindings(target.id);
+      const proposal = buildClientProposal({ target, findings });
+      const report = await saveReport({
+        targetId: target.id,
+        kind: "CLIENT_PROPOSAL",
+        markdown: proposal.markdown,
+        summary: proposal.summary,
+      });
+      await setOnboardingReport({
+        workspaceId: candidate.workspace_id,
+        reportId: report.id,
+      });
+      results.push({
+        workspaceId: candidate.workspace_id,
+        targetId: target.id,
+        reportId: report.id,
+      });
+    } catch (error) {
+      const code = String(error?.code || "FINALIZATION_FAILED").slice(0, 120);
+      await failOnboardingFinalization({
+        workspaceId: candidate.workspace_id,
+        errorCode: code,
+      });
+      failures.push({ workspaceId: candidate.workspace_id, code });
+    }
   }
-  return { finalized: results.length, reports: results };
+  return {
+    claimed: candidates.length,
+    finalized: results.length,
+    failed: failures.length,
+    reports: results,
+    failures,
+  };
 }

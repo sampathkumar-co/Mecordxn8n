@@ -165,6 +165,10 @@ function normalizeJobInput(body) {
     capability: body.capability,
     requestedUrl: body.requestedUrl,
     input: body.input || {},
+    maxAttempts:
+      body.maxAttempts == null
+        ? 3
+        : Math.min(Math.max(Number(body.maxAttempts) || 3, 1), 10),
   };
 }
 

@@ -531,6 +531,24 @@ export async function recordIntegrationWebhookReceipt({
   return result.rows[0] || null;
 }
 
+export async function markIntegrationWebhookReceiptProcessed({
+  receiptId,
+  processedState,
+}) {
+  const allowed = new Set(["RECORDED", "PROCESSED", "IGNORED", "FAILED"]);
+  if (!allowed.has(processedState)) {
+    throw new Error("invalid webhook receipt state");
+  }
+  const result = await pool.query(
+    `UPDATE integration_webhook_receipts
+        SET processed_state = $2
+      WHERE id = $1
+      RETURNING *`,
+    [receiptId, processedState],
+  );
+  return result.rows[0] || null;
+}
+
 export async function applyStripeSubscriptionEvent({
   workspaceId,
   eventType,

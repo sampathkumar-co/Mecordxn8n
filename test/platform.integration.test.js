@@ -67,7 +67,11 @@ function targetBody(host, organizationName = host) {
     authorization: {
       mode: "PUBLIC_QA_ONLY",
       allowedHosts: [host],
-      allowedCapabilities: ["PUBLIC_HTTP_OBSERVE", "BROWSER_QA"],
+      allowedCapabilities: [
+        "PUBLIC_HTTP_OBSERVE",
+        "BROWSER_QA",
+        "PERFORMANCE_AUDIT",
+      ],
     },
   };
 }
@@ -327,7 +331,7 @@ test(
           body: {
             targetId: targetA.id,
             jobType: "api-key-forbidden",
-            capability: "PUBLIC_HTTP_OBSERVE",
+            capability: "PERFORMANCE_AUDIT",
             requestedUrl: targetA.baseUrl,
           },
         },
@@ -355,6 +359,10 @@ test(
         },
       );
       assert.equal(job.status, 201);
+      await pool.query(
+        "UPDATE jobs SET state = 'CANCELLED', completed_at = now() WHERE id = $1",
+        [job.body.id],
+      );
 
       const after = await request(
         `/v1/platform/workspaces/${workspaceA.id}/subscription`,

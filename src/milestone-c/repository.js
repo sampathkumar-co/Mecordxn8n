@@ -777,6 +777,19 @@ export async function recordCommercialDelivery({
       return null;
     }
     if (action.state === state) {
+      const immutableMismatch =
+        action.delivered_by !== deliveredBy ||
+        (providerReference != null &&
+          action.provider_reference !== providerReference) ||
+        (state === "FAILED" &&
+          failureCode != null &&
+          action.failure_code !== failureCode);
+      if (immutableMismatch) {
+        throw problem(
+          "IDEMPOTENCY_CONFLICT",
+          "delivery state already exists with different immutable values",
+        );
+      }
       await client.query("COMMIT");
       return mapAction(action);
     }
@@ -992,6 +1005,20 @@ export async function recordRevenueEvent({
       return null;
     }
     const row = opportunity.rows[0];
+    if (row.currency && row.currency !== currency) {
+      throw problem(
+        "CURRENCY_MISMATCH",
+        "revenue currency must match the commercial opportunity currency",
+      );
+    }
+    if (!row.currency) {
+      await client.query(
+        `UPDATE commercial_opportunities
+            SET currency = $2, updated_at = now()
+          WHERE id = $1`,
+        [opportunityId, currency],
+      );
+    }
 
     let inserted = await client.query(
       `INSERT INTO revenue_events (
@@ -1088,6 +1115,12 @@ export async function createServiceAgreement({
       return null;
     }
     const row = opportunity.rows[0];
+    if (currency && row.currency && currency !== row.currency) {
+      throw problem(
+        "CURRENCY_MISMATCH",
+        "service currency must match the commercial opportunity currency",
+      );
+    }
 
     const received = await client.query(
       `SELECT COALESCE(SUM(

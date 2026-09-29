@@ -1,0 +1,72 @@
+{
+  "name": "Mecordxn8n - Journey QA Dispatch",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "trigger-journey-qa-dispatch.json",
+      "name": "Every Minute",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.MECORDXN8N_JOURNEY_QA_URL + '/run-once' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.MECORDXN8N_WORKER_TRIGGER_TOKEN }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "dispatch-journey-qa-dispatch.json",
+      "name": "Dispatch One Journey Job",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        260,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Every Minute": {
+      "main": [
+        [
+          {
+            "node": "Dispatch One Journey Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "versionId": "0c0110fe-7d5c-4838-bfb7-81dc4d3dcb3f",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}

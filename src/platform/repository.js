@@ -526,6 +526,266 @@ export async function listWorkspaceOperations(workspaceId, limit = 100) {
   };
 }
 
+export async function listWorkspaceRepairs(workspaceId, limit = 100) {
+  const safe = safeLimit(limit);
+  const [eligible, approvals, repairs] = await Promise.all([
+    pool.query(
+      `SELECT f.id, f.target_id, t.organization_name, f.title, f.category,
+              f.severity, f.confidence, f.affected_url,
+              i.opportunity_score, i.impact_tier,
+              v.created_at AS verified_at
+         FROM findings f
+         JOIN targets t ON t.id = f.target_id
+         JOIN LATERAL (
+           SELECT fv.created_at
+             FROM finding_verifications fv
+            WHERE fv.finding_id = f.id
+              AND fv.status = 'VERIFIED'
+            ORDER BY fv.created_at DESC
+            LIMIT 1
+         ) v ON true
+         JOIN LATERAL (
+           SELECT a.mode, a.allowed_capabilities, a.expires_at
+             FROM authorizations a
+            WHERE a.target_id = f.target_id
+              AND a.revoked_at IS NULL
+            ORDER BY a.created_at DESC
+            LIMIT 1
+         ) ca ON true
+         LEFT JOIN finding_intelligence i ON i.finding_id = f.id
+        WHERE t.workspace_id = $1
+          AND f.status NOT IN ('RESOLVED','DISMISSED')
+          AND ca.mode = 'CLIENT_AUTHORIZED'
+          AND 'SOURCE_REMEDIATION' = ANY(ca.allowed_capabilities)
+          AND (ca.expires_at IS NULL OR ca.expires_at > now())
+          AND NOT EXISTS (
+            SELECT 1
+              FROM approval_requests ar
+             WHERE ar.finding_id = f.id
+               AND ar.action_type = 'SOURCE_REMEDIATION'
+               AND ar.status = 'PENDING'
+          )
+          AND NOT EXISTS (
+            SELECT 1
+              FROM remediation_requests rr
+             WHERE rr.finding_id = f.id
+               AND rr.status IN ('QUEUED','RUNNING','SUCCEEDED')
+          )
+        ORDER BY i.opportunity_score DESC NULLS LAST, f.last_seen_at DESC
+        LIMIT $2`,
+      [workspaceId, safe],
+    ),
+    pool.query(
+      `SELECT a.id, a.target_id, a.finding_id, a.status, a.requested_by,
+              a.expires_at, a.created_at,
+              t.organization_name, f.title, f.severity
+         FROM approval_requests a
+         JOIN targets t ON t.id = a.target_id
+         LEFT JOIN findings f ON f.id = a.finding_id
+        WHERE t.workspace_id = $1
+          AND a.action_type = 'SOURCE_REMEDIATION'
+          AND a.status = 'PENDING'
+        ORDER BY a.expires_at, a.created_at
+        LIMIT $2`,
+      [workspaceId, safe],
+    ),
+    pool.query(
+      `SELECT r.id, r.target_id, r.finding_id, r.job_id, r.status,
+              r.created_at, r.completed_at,
+              t.organization_name, f.title, f.category, f.severity,
+              j.state AS job_state, j.attempt_count, j.max_attempts,
+              NULLIF(j.error->>'code','') AS error_code,
+              j.input->>'approvalId' AS approval_id,
+              o.outcome, o.summary AS outcome_summary,
+              o.created_at AS outcome_created_at
+         FROM remediation_requests r
+         JOIN targets t ON t.id = r.target_id
+         JOIN findings f ON f.id = r.finding_id
+         JOIN jobs j ON j.id = r.job_id
+         LEFT JOIN repair_outcomes o ON o.remediation_request_id = r.id
+        WHERE t.workspace_id = $1
+        ORDER BY r.created_at DESC
+        LIMIT $2`,
+      [workspaceId, safe],
+    ),
+  ]);
+  return {
+    eligible: eligible.rows.map((row) => ({
+      id: row.id,
+      targetId: row.target_id,
+      organizationName: row.organization_name,
+      title: row.title,
+      category: row.category,
+      severity: row.severity,
+      confidence: Number(row.confidence),
+      affectedUrl: sanitizeOperationalUrl(row.affected_url),
+      opportunityScore:
+        row.opportunity_score == null ? null : Number(row.opportunity_score),
+      impactTier: row.impact_tier,
+      verifiedAt: row.verified_at,
+    })),
+    approvals: approvals.rows.map((row) => ({
+      id: row.id,
+      targetId: row.target_id,
+      findingId: row.finding_id,
+      status: row.status,
+      requestedBy: row.requested_by,
+      expiresAt: row.expires_at,
+      createdAt: row.created_at,
+      organizationName: row.organization_name,
+      findingTitle: row.title,
+      severity: row.severity,
+    })),
+    repairs: repairs.rows.map((row) => ({
+      id: row.id,
+      targetId: row.target_id,
+      findingId: row.finding_id,
+      jobId: row.job_id,
+      requestStatus: row.status,
+      jobState: row.job_state,
+      attemptCount: row.attempt_count,
+      maxAttempts: row.max_attempts,
+      errorCode: row.error_code || null,
+      approvalId: row.approval_id || null,
+      organizationName: row.organization_name,
+      findingTitle: row.title,
+      category: row.category,
+      severity: row.severity,
+      outcome: row.outcome || null,
+      outcomeSummary: row.outcome_summary || null,
+      createdAt: row.created_at,
+      completedAt: row.completed_at,
+      outcomeCreatedAt: row.outcome_created_at,
+    })),
+  };
+}
+
+export async function getWorkspaceRepairSummary(workspaceId, repairId) {
+  const result = await pool.query(
+    `SELECT r.id, r.target_id, r.finding_id, r.job_id, r.status,
+            r.created_at, r.completed_at,
+            t.organization_name, t.base_url,
+            f.title, f.category, f.severity, f.confidence, f.affected_url,
+            v.status AS verification_status,
+            v.confidence AS verification_confidence,
+            v.created_at AS verification_created_at,
+            i.opportunity_score, i.impact_tier, i.rationale,
+            j.state AS job_state, j.attempt_count, j.max_attempts,
+            j.created_at AS job_created_at, j.started_at AS job_started_at,
+            j.completed_at AS job_completed_at,
+            NULLIF(j.error->>'code','') AS error_code,
+            a.id AS approval_id, a.status AS approval_status,
+            a.requested_by, a.decided_by, a.decision_note,
+            a.created_at AS approval_created_at, a.decided_at,
+            a.expires_at AS approval_expires_at,
+            o.outcome, o.summary AS outcome_summary,
+            o.created_at AS outcome_created_at,
+            ca.id AS current_authorization_id,
+            ca.mode AS current_authorization_mode,
+            ca.allowed_capabilities AS current_allowed_capabilities,
+            ca.expires_at AS current_authorization_expires_at
+       FROM remediation_requests r
+       JOIN targets t ON t.id = r.target_id
+       JOIN findings f ON f.id = r.finding_id
+       JOIN jobs j ON j.id = r.job_id
+       LEFT JOIN LATERAL (
+         SELECT fv.status, fv.confidence, fv.created_at
+           FROM finding_verifications fv
+          WHERE fv.finding_id = f.id
+          ORDER BY fv.created_at DESC
+          LIMIT 1
+       ) v ON true
+       LEFT JOIN finding_intelligence i ON i.finding_id = f.id
+       LEFT JOIN approval_requests a
+         ON a.id::text = j.input->>'approvalId'
+       LEFT JOIN repair_outcomes o
+         ON o.remediation_request_id = r.id
+       LEFT JOIN LATERAL (
+         SELECT auth.id, auth.mode, auth.allowed_capabilities, auth.expires_at
+           FROM authorizations auth
+          WHERE auth.target_id = r.target_id
+            AND auth.revoked_at IS NULL
+          ORDER BY auth.created_at DESC
+          LIMIT 1
+       ) ca ON true
+      WHERE r.id = $1
+        AND t.workspace_id = $2`,
+    [repairId, workspaceId],
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  return {
+    id: row.id,
+    targetId: row.target_id,
+    findingId: row.finding_id,
+    jobId: row.job_id,
+    requestStatus: row.status,
+    createdAt: row.created_at,
+    completedAt: row.completed_at,
+    target: {
+      organizationName: row.organization_name,
+      baseUrl: sanitizeOperationalUrl(row.base_url),
+    },
+    finding: {
+      title: row.title,
+      category: row.category,
+      severity: row.severity,
+      confidence: Number(row.confidence),
+      affectedUrl: sanitizeOperationalUrl(row.affected_url),
+      verification: row.verification_status
+        ? {
+            status: row.verification_status,
+            confidence: Number(row.verification_confidence),
+            createdAt: row.verification_created_at,
+          }
+        : null,
+      intelligence: row.opportunity_score == null
+        ? null
+        : {
+            opportunityScore: Number(row.opportunity_score),
+            impactTier: row.impact_tier,
+            rationale: row.rationale,
+          },
+    },
+    job: {
+      state: row.job_state,
+      attemptCount: row.attempt_count,
+      maxAttempts: row.max_attempts,
+      errorCode: row.error_code || null,
+      createdAt: row.job_created_at,
+      startedAt: row.job_started_at,
+      completedAt: row.job_completed_at,
+    },
+    approval: row.approval_id
+      ? {
+          id: row.approval_id,
+          status: row.approval_status,
+          requestedBy: row.requested_by,
+          decidedBy: row.decided_by,
+          decisionNote: row.decision_note,
+          createdAt: row.approval_created_at,
+          decidedAt: row.decided_at,
+          expiresAt: row.approval_expires_at,
+        }
+      : null,
+    outcome: row.outcome
+      ? {
+          status: row.outcome,
+          summary: row.outcome_summary,
+          createdAt: row.outcome_created_at,
+        }
+      : null,
+    currentAuthorization: row.current_authorization_id
+      ? {
+          id: row.current_authorization_id,
+          mode: row.current_authorization_mode,
+          allowedCapabilities: row.current_allowed_capabilities || [],
+          expiresAt: row.current_authorization_expires_at,
+        }
+      : null,
+  };
+}
+
 export async function listWorkspaceAudit(workspaceId, limit = 100) {
   const result = await pool.query(
     `SELECT a.id, a.target_id, a.job_id, a.event_type,

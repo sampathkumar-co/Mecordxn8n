@@ -109,6 +109,7 @@ export async function createAuthorizedJob({
   requestedUrl,
   input,
   decision,
+  maxAttempts = 3,
 }) {
   const client = await pool.connect();
 
@@ -122,13 +123,15 @@ export async function createAuthorizedJob({
          job_type,
          capability,
          requested_url,
-         input
+         input,
+         max_attempts
        )
-       VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+       VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
        RETURNING id, target_id, authorization_id, job_type, capability,
                  requested_url, state, input, output, error, created_at,
                  started_at, completed_at, lease_owner, lease_expires_at,
-                 attempt_count`,
+                 attempt_count, max_attempts, next_attempt_at,
+                 last_heartbeat_at, cost_units`,
       [
         targetId,
         authorizationId,
@@ -136,6 +139,7 @@ export async function createAuthorizedJob({
         capability,
         requestedUrl,
         JSON.stringify(input || {}),
+        Math.min(Math.max(Number(maxAttempts) || 3, 1), 10),
       ],
     );
 
@@ -194,7 +198,8 @@ export async function getJob(jobId) {
     `SELECT id, target_id, authorization_id, job_type, capability,
             requested_url, state, input, output, error, created_at,
             started_at, completed_at, lease_owner, lease_expires_at,
-            attempt_count
+            attempt_count, max_attempts, next_attempt_at,
+            last_heartbeat_at, cost_units
        FROM jobs
       WHERE id = $1`,
     [jobId],
@@ -218,15 +223,19 @@ export async function leaseNextJob({
          SELECT id
            FROM jobs
           WHERE capability = ANY($1::text[])
+            AND attempt_count < max_attempts
             AND (
-              state = 'QUEUED'
+              (
+                state = 'QUEUED'
+                AND (next_attempt_at IS NULL OR next_attempt_at <= now())
+              )
               OR (
                 state = 'RUNNING'
                 AND lease_expires_at IS NOT NULL
                 AND lease_expires_at <= now()
               )
             )
-          ORDER BY created_at
+          ORDER BY COALESCE(next_attempt_at, created_at), created_at
           FOR UPDATE SKIP LOCKED
           LIMIT 1
        )
@@ -235,6 +244,8 @@ export async function leaseNextJob({
               lease_owner = $2,
               lease_expires_at = now() + ($3 * interval '1 second'),
               attempt_count = j.attempt_count + 1,
+              next_attempt_at = NULL,
+              last_heartbeat_at = now(),
               started_at = COALESCE(j.started_at, now())
          FROM candidate
         WHERE j.id = candidate.id
@@ -242,7 +253,8 @@ export async function leaseNextJob({
                  j.capability, j.requested_url, j.state, j.input,
                  j.output, j.error, j.created_at, j.started_at,
                  j.completed_at, j.lease_owner, j.lease_expires_at,
-                 j.attempt_count`,
+                 j.attempt_count, j.max_attempts, j.next_attempt_at,
+                 j.last_heartbeat_at, j.cost_units`,
       [capabilities, workerId, leaseSeconds],
     );
 
@@ -383,12 +395,25 @@ export async function completeLeasedJob({
 
     const result = await client.query(
       `UPDATE jobs
-          SET state = $3,
+          SET state = CASE
+                WHEN $3 = 'FAILED' AND attempt_count < max_attempts THEN 'QUEUED'
+                WHEN $3 = 'FAILED' AND attempt_count >= max_attempts THEN 'DEAD_LETTER'
+                ELSE $3
+              END,
               output = $4::jsonb,
               error = $5::jsonb,
-              completed_at = now(),
+              completed_at = CASE
+                WHEN $3 = 'FAILED' AND attempt_count < max_attempts THEN NULL
+                ELSE now()
+              END,
+              next_attempt_at = CASE
+                WHEN $3 = 'FAILED' AND attempt_count < max_attempts
+                  THEN now() + (LEAST(300, 5 * power(2, GREATEST(attempt_count - 1, 0))) * interval '1 second')
+                ELSE NULL
+              END,
               lease_owner = NULL,
-              lease_expires_at = NULL
+              lease_expires_at = NULL,
+              last_heartbeat_at = now()
         WHERE id = $1
           AND lease_owner = $2
           AND state = 'RUNNING'
@@ -396,7 +421,8 @@ export async function completeLeasedJob({
        RETURNING id, target_id, authorization_id, job_type, capability,
                  requested_url, state, input, output, error, created_at,
                  started_at, completed_at, lease_owner, lease_expires_at,
-                 attempt_count`,
+                 attempt_count, max_attempts, next_attempt_at,
+                 last_heartbeat_at, cost_units`,
       [
         jobId,
         workerId,
@@ -412,6 +438,12 @@ export async function completeLeasedJob({
     }
 
     const job = result.rows[0];
+    const eventType =
+      job.state === "SUCCEEDED"
+        ? "JOB_SUCCEEDED"
+        : job.state === "DEAD_LETTER"
+          ? "JOB_DEAD_LETTERED"
+          : "JOB_RETRY_SCHEDULED";
 
     await client.query(
       `INSERT INTO audit_events (target_id, job_id, event_type, payload)
@@ -419,10 +451,29 @@ export async function completeLeasedJob({
       [
         job.target_id,
         job.id,
-        state === "SUCCEEDED" ? "JOB_SUCCEEDED" : "JOB_FAILED",
-        JSON.stringify({ workerId }),
+        eventType,
+        JSON.stringify({
+          workerId,
+          resultingState: job.state,
+          nextAttemptAt: job.next_attempt_at,
+          attemptCount: job.attempt_count,
+          maxAttempts: job.max_attempts,
+        }),
       ],
     );
+
+    if (job.state === "DEAD_LETTER") {
+      await client.query(
+        `INSERT INTO operational_events (
+           component, event_type, severity, job_id, target_id, payload
+         ) VALUES ('queue', 'JOB_DEAD_LETTERED', 'ERROR', $1, $2, $3::jsonb)`,
+        [
+          job.id,
+          job.target_id,
+          JSON.stringify({ attemptCount: job.attempt_count }),
+        ],
+      );
+    }
 
     await client.query("COMMIT");
     return mapJob(job);
@@ -432,6 +483,76 @@ export async function completeLeasedJob({
   } finally {
     client.release();
   }
+}
+
+export async function heartbeatLeasedJob({
+  jobId,
+  workerId,
+  leaseSeconds = 60,
+}) {
+  const safeSeconds = Math.min(Math.max(Number(leaseSeconds) || 60, 15), 300);
+  const result = await pool.query(
+    `UPDATE jobs
+        SET lease_expires_at = now() + ($3 * interval '1 second'),
+            last_heartbeat_at = now()
+      WHERE id = $1
+        AND lease_owner = $2
+        AND state = 'RUNNING'
+        AND lease_expires_at > now()
+      RETURNING id, lease_expires_at, last_heartbeat_at`,
+    [jobId, workerId, safeSeconds],
+  );
+  return result.rows[0] || null;
+}
+
+export async function sweepExhaustedJobs() {
+  const result = await pool.query(
+    `UPDATE jobs
+        SET state = 'DEAD_LETTER',
+            completed_at = now(),
+            lease_owner = NULL,
+            lease_expires_at = NULL
+      WHERE state IN ('QUEUED', 'RUNNING')
+        AND attempt_count >= max_attempts
+        AND (
+          state = 'QUEUED'
+          OR lease_expires_at IS NULL
+          OR lease_expires_at <= now()
+        )
+      RETURNING id, target_id, attempt_count`,
+  );
+
+  for (const row of result.rows) {
+    await pool.query(
+      `INSERT INTO operational_events (
+         component, event_type, severity, job_id, target_id, payload
+       ) VALUES ('queue', 'JOB_DEAD_LETTERED', 'ERROR', $1, $2, $3::jsonb)`,
+      [row.id, row.target_id, JSON.stringify({ attemptCount: row.attempt_count })],
+    );
+  }
+
+  return result.rows.length;
+}
+
+export async function recordJobCost({ jobId, costUnits }) {
+  const units = Math.max(0, Number(costUnits) || 0);
+  const result = await pool.query(
+    `WITH updated AS (
+       UPDATE jobs
+          SET cost_units = cost_units + $2
+        WHERE id = $1
+        RETURNING target_id
+     )
+     INSERT INTO daily_usage (target_id, usage_date, cost_units, job_count)
+     SELECT target_id, CURRENT_DATE, $2, 1 FROM updated
+     ON CONFLICT (target_id, usage_date)
+     DO UPDATE SET
+       cost_units = daily_usage.cost_units + EXCLUDED.cost_units,
+       job_count = daily_usage.job_count + 1
+     RETURNING target_id, usage_date, cost_units, job_count`,
+    [jobId, units],
+  );
+  return result.rows[0] || null;
 }
 
 export async function closePool() {
@@ -470,6 +591,10 @@ function mapJob(row) {
     leaseOwner: row.lease_owner,
     leaseExpiresAt: row.lease_expires_at,
     attemptCount: row.attempt_count,
+    maxAttempts: row.max_attempts,
+    nextAttemptAt: row.next_attempt_at,
+    lastHeartbeatAt: row.last_heartbeat_at,
+    costUnits: Number(row.cost_units || 0),
   };
 }
 

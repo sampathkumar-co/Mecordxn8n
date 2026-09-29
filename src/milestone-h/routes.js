@@ -62,6 +62,18 @@ function validId(value) {
   return UUID_RE.test(String(value || ""));
 }
 
+function publicClientAddress(req) {
+  const direct = String(req.socket?.remoteAddress || "unknown").trim();
+  if (String(process.env.TRUST_PROXY_HEADERS || "").toLowerCase() !== "true") {
+    return direct;
+  }
+  const forwarded = String(req.headers["x-forwarded-for"] || "")
+    .split(",")[0]
+    .trim();
+  if (!forwarded) return direct;
+  return forwarded.slice(0, 128);
+}
+
 function boundedString(value, max, name, badRequest, { required = false } = {}) {
   const text = String(value || "").trim();
   if (required && !text) throw badRequest(name + " is required");
@@ -160,7 +172,7 @@ export async function handleMilestoneHPublicRoute({
   badRequest,
 }) {
   if (req.method === "POST" && url.pathname === "/v1/platform/auth/signup") {
-    const remoteAddress = String(req.socket?.remoteAddress || "unknown");
+    const remoteAddress = publicClientAddress(req);
     if (!(await consumePublicRateLimit({ key: "signup-ip:" + remoteAddress, limit: 10 }))) {
       return json(res, 429, { error: "SIGNUP_RATE_LIMITED" });
     }

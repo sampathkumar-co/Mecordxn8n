@@ -23,6 +23,7 @@ services:
       DB_POOL_MAX: ${DB_POOL_MAX:-10}
       ORCHESTRATOR_TOKEN: ${ORCHESTRATOR_TOKEN}
       WORKER_TOKEN: ${WORKER_TOKEN}
+      BOOTSTRAP_TOKEN: ${BOOTSTRAP_TOKEN}
     depends_on:
       postgres:
         condition: service_healthy

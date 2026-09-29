@@ -22,11 +22,13 @@ import {
   createMonitoringPolicy,
   decideApprovalRequest,
   expirePendingApprovals,
+  findRemediationByApprovalId,
   getApprovalRequest,
   getOperationalMetrics,
   listMonitoringPolicies,
   listOpenRegressions,
   lookupRepairPatterns,
+  markReportApproved,
   recordMonitoringFailure,
   recordMonitoringRunFromLease,
   getActiveLease,
@@ -55,6 +57,27 @@ function authorize(args) {
 }
 
 async function queueApprovedRemediation(approval) {
+  const alreadyQueued = await findRemediationByApprovalId(approval.id);
+  if (alreadyQueued) {
+    return {
+      job: {
+        id: alreadyQueued.id,
+        targetId: alreadyQueued.target_id,
+        capability: alreadyQueued.capability,
+        state: alreadyQueued.state,
+        input: alreadyQueued.input,
+      },
+      remediationRequest: alreadyQueued.remediation_request_id
+        ? {
+            id: alreadyQueued.remediation_request_id,
+            status: alreadyQueued.remediation_status,
+            projectRoot: alreadyQueued.project_root,
+          }
+        : null,
+      duplicate: true,
+    };
+  }
+
   const existingFinding = await getFindingContext(approval.findingId);
   if (!existingFinding) {
     const error = new Error("finding not found");
@@ -259,7 +282,21 @@ export async function handleMilestoneBRoute({
       return json(res, 409, { error: "APPROVAL_EXPIRED", approval: result.approval });
     }
     if (result.status === "ALREADY_DECIDED") {
-      return json(res, 409, { error: "APPROVAL_ALREADY_DECIDED", approval: result.approval });
+      if (
+        result.approval.status === "APPROVED" &&
+        result.approval.actionType === "SOURCE_REMEDIATION"
+      ) {
+        const queued = await queueApprovedRemediation(result.approval);
+        return json(res, 200, {
+          approval: result.approval,
+          ...queued,
+          idempotentReplay: true,
+        });
+      }
+      return json(res, 409, {
+        error: "APPROVAL_ALREADY_DECIDED",
+        approval: result.approval,
+      });
     }
 
     if (decision === "REJECTED") {
@@ -275,7 +312,11 @@ export async function handleMilestoneBRoute({
     }
 
     if (result.approval.actionType === "REPORT_RELEASE") {
-      return json(res, 200, { approval: result.approval });
+      const report = await markReportApproved(result.approval.reportId);
+      return json(res, 200, {
+        approval: result.approval,
+        report,
+      });
     }
 
     return json(res, 200, { approval: result.approval });

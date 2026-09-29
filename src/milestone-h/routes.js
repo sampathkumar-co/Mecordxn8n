@@ -43,6 +43,7 @@ import {
   listTargetAuthorizationCenter,
   markOnboardingStep,
   recordBillingCheckout,
+  reconcileBillingInvoice,
   reportBelongsToWorkspace,
   replaceTargetAuthorization,
   revokeReportShareLink,
@@ -231,6 +232,14 @@ export async function handleMilestoneHPublicRoute({
           subscription: object,
         });
       }
+    } else if (
+      ["invoice.payment_failed", "invoice.payment_succeeded"].includes(event.type)
+    ) {
+      await reconcileBillingInvoice({
+        customerId: object.customer ? String(object.customer) : null,
+        subscriptionId: object.subscription ? String(object.subscription) : null,
+        paid: event.type === "invoice.payment_succeeded",
+      });
     }
     return json(res, 202, { accepted: true });
   }

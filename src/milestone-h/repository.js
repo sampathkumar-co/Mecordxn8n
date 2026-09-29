@@ -493,6 +493,12 @@ export async function claimOnboardingReadyForReport(limit = 25) {
                WHERE j.id IN (o.first_http_job_id, o.first_browser_job_id)
                  AND j.state IN ('QUEUED','RUNNING')
             )
+            AND EXISTS (
+              SELECT 1
+                FROM jobs j
+               WHERE j.id IN (o.first_http_job_id, o.first_browser_job_id)
+                 AND j.state = 'SUCCEEDED'
+            )
           ORDER BY o.updated_at
           FOR UPDATE OF o SKIP LOCKED
           LIMIT $1
@@ -517,6 +523,43 @@ export async function claimOnboardingReadyForReport(limit = 25) {
   } finally {
     client.release();
   }
+}
+
+export async function blockFailedOnboardingAssessments(limit = 100) {
+  const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
+  const result = await pool.query(
+    `WITH candidates AS (
+       SELECT o.workspace_id
+         FROM workspace_onboarding o
+        WHERE o.status = 'IN_PROGRESS'
+          AND o.first_report_id IS NULL
+          AND (o.first_http_job_id IS NOT NULL OR o.first_browser_job_id IS NOT NULL)
+          AND NOT EXISTS (
+            SELECT 1
+              FROM jobs j
+             WHERE j.id IN (o.first_http_job_id, o.first_browser_job_id)
+               AND j.state IN ('QUEUED','RUNNING')
+          )
+          AND NOT EXISTS (
+            SELECT 1
+              FROM jobs j
+             WHERE j.id IN (o.first_http_job_id, o.first_browser_job_id)
+               AND j.state = 'SUCCEEDED'
+          )
+        ORDER BY o.updated_at
+        LIMIT $1
+     )
+     UPDATE workspace_onboarding o
+        SET status = 'BLOCKED',
+            blocked_reason = 'ASSESSMENT_FAILED',
+            last_error_code = 'ASSESSMENT_FAILED',
+            updated_at = now()
+       FROM candidates
+      WHERE o.workspace_id = candidates.workspace_id
+      RETURNING o.workspace_id`,
+    [safeLimit],
+  );
+  return result.rows.length;
 }
 
 export async function failOnboardingFinalization({

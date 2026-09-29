@@ -367,7 +367,7 @@ export function createServer({
     } catch (error) {
       const statusCode = error.statusCode || 500;
       return json(res, statusCode, {
-        error: statusCode >= 500 ? "INTERNAL_ERROR" : "BAD_REQUEST",
+        error: statusCode >= 500 ? "INTERNAL_ERROR" : (error.code || "BAD_REQUEST"),
         message: statusCode >= 500 ? "unexpected server error" : error.message,
       });
     }

@@ -35,7 +35,23 @@
         <label>Email<input id="login-email" name="email" type="email" autocomplete="username" required></label>
         <label>Password<input id="login-password" name="password" type="password" autocomplete="current-password" minlength="12" required></label>
         <button class="button primary" type="submit">Sign in</button>
+        <button id="show-signup" class="button text" type="button">New customer? Start free trial</button>
         <button id="show-bootstrap" class="button text" type="button">First deployment? Bootstrap owner</button>
+      </form>
+
+      <form id="signup-form" class="auth-card hidden">
+        <div>
+          <p class="eyebrow">14-DAY TEAM TRIAL</p>
+          <h2>Create workspace</h2>
+          <p class="muted">Start with non-destructive QA. Privileged source access is unlocked only after ownership verification.</p>
+        </div>
+        <label>Your name<input id="signup-name" maxlength="160" required></label>
+        <label>Email<input id="signup-email" type="email" autocomplete="email" required></label>
+        <label>Password<input id="signup-password" type="password" minlength="12" maxlength="128" autocomplete="new-password" required></label>
+        <label>Workspace name<input id="signup-workspace" maxlength="160" required></label>
+        <label>Workspace slug<input id="signup-slug" maxlength="80" pattern="[A-Za-z0-9-]+"></label>
+        <button class="button primary" type="submit">Start trial</button>
+        <button id="signup-back-login" class="button text" type="button">Back to sign in</button>
       </form>
 
       <form id="bootstrap-form" class="auth-card hidden">
@@ -70,14 +86,16 @@
 
       <nav id="nav" class="nav" aria-label="Primary">
         <button data-view="overview" class="nav-item active"><span>Overview</span><kbd>1</kbd></button>
-        <button data-view="targets" class="nav-item"><span>Targets</span><kbd>2</kbd></button>
-        <button data-view="findings" class="nav-item"><span>Findings</span><kbd>3</kbd></button>
-        <button data-view="approvals" class="nav-item"><span>Approvals</span><kbd>4</kbd></button>
-        <button data-view="pipeline" class="nav-item"><span>Pipeline</span><kbd>5</kbd></button>
-        <button data-view="operations" class="nav-item"><span>Operations</span><kbd>6</kbd></button>
-        <button data-view="integrations" class="nav-item"><span>Integrations</span><kbd>7</kbd></button>
-        <button data-view="team" class="nav-item"><span>Team & Access</span><kbd>8</kbd></button>
-        <button data-view="audit" class="nav-item"><span>Audit</span><kbd>9</kbd></button>
+        <button data-view="launch" class="nav-item"><span>Launch</span><kbd>2</kbd></button>
+        <button data-view="targets" class="nav-item"><span>Targets</span><kbd>3</kbd></button>
+        <button data-view="findings" class="nav-item"><span>Findings</span><kbd>4</kbd></button>
+        <button data-view="approvals" class="nav-item"><span>Approvals</span><kbd>5</kbd></button>
+        <button data-view="pipeline" class="nav-item"><span>Pipeline</span><kbd>6</kbd></button>
+        <button data-view="operations" class="nav-item"><span>Operations</span><kbd>7</kbd></button>
+        <button data-view="integrations" class="nav-item"><span>Integrations</span><kbd>8</kbd></button>
+        <button data-view="team" class="nav-item"><span>Team & Access</span><kbd>9</kbd></button>
+        <button data-view="audit" class="nav-item"><span>Audit</span></button>
+        <button id="operator-nav" data-view="operator" class="nav-item hidden"><span>Operator</span></button>
       </nav>
 
       <div class="sidebar-foot">

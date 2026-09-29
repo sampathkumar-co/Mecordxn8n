@@ -123,6 +123,10 @@ function hydrateShell() {
   $("#user-chip").innerHTML = state.me.principal.user
     ? `<strong>${escapeHtml(state.me.principal.user.displayName)}</strong><span>${escapeHtml(state.me.principal.user.email)}</span>`
     : `<strong>API key</strong><span>Workspace-scoped access</span>`;
+  $("#operator-nav").classList.toggle(
+    "hidden",
+    !state.me.principal.user?.isPlatformOperator,
+  );
 }
 
 function currentWorkspace() {
@@ -131,6 +135,7 @@ function currentWorkspace() {
 
 const viewMeta = {
   overview: ["WORKSPACE", "Overview", "Add target"],
+  launch: ["GO LIVE", "Launch", "Refresh"],
   targets: ["ASSETS", "Targets", "Add target"],
   findings: ["EVIDENCE", "Findings", "Refresh"],
   approvals: ["HUMAN GATES", "Approvals", "Refresh"],
@@ -139,6 +144,7 @@ const viewMeta = {
   integrations: ["CONNECTIONS", "Integrations", "Add integration"],
   team: ["ACCESS", "Team & Access", "Invite member"],
   audit: ["GOVERNANCE", "Audit", "Refresh"],
+  operator: ["PLATFORM", "Operator", "Refresh"],
 };
 
 async function render() {
@@ -153,6 +159,7 @@ async function render() {
   try {
     const renderer = {
       overview: renderOverview,
+      launch: renderLaunch,
       targets: renderTargets,
       findings: renderFindings,
       approvals: renderApprovals,
@@ -161,6 +168,7 @@ async function render() {
       integrations: renderIntegrations,
       team: renderTeam,
       audit: renderAudit,
+      operator: renderOperator,
     }[state.view];
     await renderer();
     content.focus();
@@ -235,7 +243,7 @@ async function renderTargets() {
     "Authorized targets",
     ["Organization", "Base URL", "Authorization", "Findings", "Monitors", "Created"],
     data.targets.map((item) => [
-      `<div class="primary-text">${escapeHtml(item.organizationName)}</div>`,
+      `<button class="button text target-open" data-id="${escapeHtml(item.id)}"><span class="primary-text">${escapeHtml(item.organizationName)}</span></button>`,
       `<div class="secondary-text">${escapeHtml(item.baseUrl)}</div>`,
       chip(item.authorizationMode),
       escapeHtml(item.findingCount),
@@ -245,6 +253,251 @@ async function renderTargets() {
     "No targets yet",
     "Register the first authorized website or service boundary.",
   );
+  document.querySelectorAll(".target-open").forEach((button) => {
+    button.addEventListener("click", () => openAuthorizationCenter(button.dataset.id));
+  });
+}
+
+async function renderLaunch() {
+  const [onboarding, health, subscription, targets] = await Promise.all([
+    api(`/v1/platform/workspaces/${state.workspaceId}/onboarding`),
+    api(`/v1/platform/workspaces/${state.workspaceId}/health`),
+    api(`/v1/platform/workspaces/${state.workspaceId}/subscription`),
+    api(`/v1/platform/workspaces/${state.workspaceId}/targets`),
+  ]);
+  const target = targets.targets?.[0] || null;
+  const checks = onboarding.checklist || {};
+  const step = (label, done, copy, action = "") => `
+    <div class="launch-step">
+      <span class="launch-check ${done ? "done" : ""}">${done ? "✓" : "•"}</span>
+      <div><strong>${escapeHtml(label)}</strong><div class="secondary-text">${escapeHtml(copy)}</div></div>
+      <div>${action}</div>
+    </div>`;
+  const targetAction = target
+    ? `<button class="button small auth-center" data-id="${escapeHtml(target.id)}">Manage authorization</button>`
+    : `<button class="button small primary" id="launch-add-target">Add target</button>`;
+  const assessAction = target && !checks.assessmentStarted
+    ? `<button class="button small primary" id="launch-assess">Run assessment</button>`
+    : "";
+  const reportActions = onboarding.firstReportId
+    ? `<div class="filters">
+         <button class="button small" id="launch-request-release">Request release</button>
+         <button class="button small primary" id="launch-share-report">Create secure share</button>
+       </div>`
+    : "";
+  content.innerHTML = `
+    <div class="grid metrics">
+      ${metric("Launch status", onboarding.status, checks.reportReady ? "First report ready" : "Complete onboarding")}
+      ${metric("Service health", health.status, (health.issues || []).join(", ") || "No active issues")}
+      ${metric("Plan", subscription.subscription?.plan || subscription.workspace?.plan || "—", subscription.subscription?.status || "—")}
+      ${metric("Trial ends", fmtDate(subscription.subscription?.trial_ends_at), "Upgrade anytime")}
+    </div>
+    <div class="split">
+      <section class="panel">
+        <div class="panel-header"><h2>First-value checklist</h2><span class="chip ${onboarding.status === "READY" ? "good" : "neutral"}">${escapeHtml(onboarding.status)}</span></div>
+        <div class="panel-body launch-list">
+          ${step("Account created", checks.accountCreated, "Workspace and owner session are active.")}
+          ${step("Register target", checks.targetRegistered, "Start with non-destructive public QA.", targetAction)}
+          ${step("Verify ownership", checks.ownershipVerified, "DNS ownership is required before client-authorized source access.", target ? `<button class="button small auth-center" data-id="${escapeHtml(target.id)}">Verify / manage</button>` : "")}
+          ${step("Run first assessment", checks.assessmentStarted, "Queues authorized HTTP and browser QA only.", assessAction)}
+          ${step("Report ready", checks.reportReady, "Report release remains human-approved before external sharing.", reportActions)}
+        </div>
+      </section>
+      <section class="panel">
+        <div class="panel-header"><h2>Billing</h2><span class="chip neutral">Stripe</span></div>
+        <div class="panel-body">
+          <p class="muted">Checkout and Customer Portal open on Stripe. Card data never passes through Mecordxn8n.</p>
+          <div class="filters">
+            <button class="button small billing-checkout" data-plan="TEAM">Team</button>
+            <button class="button small billing-checkout" data-plan="BUSINESS">Business</button>
+            <button class="button small" id="billing-portal">Billing portal</button>
+          </div>
+        </div>
+      </section>
+    </div>
+    <section class="panel" style="margin-top:14px">
+      <div class="panel-header"><h2>Operational health</h2><span class="chip ${health.status === "HEALTHY" ? "good" : "warn"}">${escapeHtml(health.status)}</span></div>
+      <div class="panel-body detail-grid">
+        ${detail("Pending approvals", health.pendingApprovals)}
+        ${detail("Open regressions", health.openRegressions)}
+        ${detail("Failing monitors", health.monitoring?.failing || 0)}
+        ${detail("Integration dead letters", health.integrations24h?.DEAD_LETTER || 0)}
+      </div>
+    </section>`;
+
+  $("#launch-add-target")?.addEventListener("click", openTargetForm);
+  document.querySelectorAll(".auth-center").forEach((button) => {
+    button.addEventListener("click", () => openAuthorizationCenter(button.dataset.id));
+  });
+  $("#launch-assess")?.addEventListener("click", async () => {
+    try {
+      await api(`/v1/platform/workspaces/${state.workspaceId}/targets/${target.id}/assess`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      toast("First assessment queued");
+      await renderLaunch();
+    } catch (error) { toast(error.message, true); }
+  });
+  $("#launch-request-release")?.addEventListener("click", async () => {
+    try {
+      await api(`/v1/platform/workspaces/${state.workspaceId}/reports/${onboarding.firstReportId}/request-release`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      toast("Report release approval requested");
+      state.view = "approvals";
+      await render();
+    } catch (error) { toast(error.message, true); }
+  });
+  $("#launch-share-report")?.addEventListener("click", async () => {
+    try {
+      const result = await api(`/v1/platform/workspaces/${state.workspaceId}/reports/${onboarding.firstReportId}/share`, {
+        method: "POST",
+        body: JSON.stringify({ expiresHours: 72 }),
+      });
+      openModal("Secure report share", "EXPIRES AUTOMATICALLY",
+        `<p class="muted">Share only with the intended recipient.</p><pre class="code-block">${escapeHtml(result.url || result.token)}</pre>`);
+    } catch (error) { toast(error.message, true); }
+  });
+  document.querySelectorAll(".billing-checkout").forEach((button) => {
+    button.addEventListener("click", async () => {
+      try {
+        const result = await api(`/v1/platform/workspaces/${state.workspaceId}/billing/checkout`, {
+          method: "POST",
+          body: JSON.stringify({ plan: button.dataset.plan }),
+        });
+        window.location.assign(result.url);
+      } catch (error) { toast(error.message, true); }
+    });
+  });
+  $("#billing-portal")?.addEventListener("click", async () => {
+    try {
+      const result = await api(`/v1/platform/workspaces/${state.workspaceId}/billing/portal`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      window.location.assign(result.url);
+    } catch (error) { toast(error.message, true); }
+  });
+}
+
+async function openAuthorizationCenter(targetId) {
+  const center = await api(`/v1/platform/workspaces/${state.workspaceId}/targets/${targetId}/authorization-center`);
+  const current = center.currentAuthorization;
+  const verified = (center.domainVerifications || []).some((item) => item.status === "VERIFIED");
+  openModal("Authorization center", "TARGET TRUST BOUNDARY", `
+    <div class="detail-grid">
+      ${detail("Target", center.target.organization_name)}
+      ${detail("Base URL", center.target.base_url)}
+      ${detail("Current mode", current?.mode || "NONE")}
+      ${detail("Ownership", verified ? "VERIFIED" : "NOT VERIFIED")}
+    </div>
+    <h3>Ownership verification</h3>
+    <p class="muted">Create a DNS TXT challenge, publish it, then verify. Privileged source access remains blocked until this succeeds.</p>
+    <div class="filters">
+      <button class="button small" id="auth-create-challenge">Create DNS challenge</button>
+      ${verified ? '<span class="chip good">Verified</span>' : ""}
+    </div>
+    <h3>Authorization</h3>
+    <form id="auth-upgrade-form">
+      <div class="form-grid">
+        <label>Mode<select name="mode"><option>PUBLIC_QA_ONLY</option><option>BUG_BOUNTY</option><option>CLIENT_AUTHORIZED</option><option>DO_NOT_TEST</option></select></label>
+        <label>Expires at<input name="expiresAt" type="datetime-local"></label>
+        <label class="full">Evidence reference<input name="evidenceReference" maxlength="1000" placeholder="Contract, signed scope, program reference"></label>
+        <label><input name="browser" type="checkbox" checked> Browser QA</label>
+        <label><input name="remediation" type="checkbox"> Source remediation</label>
+      </div>
+      <div class="form-actions">
+        <button class="button danger" id="auth-revoke" type="button">Revoke access</button>
+        <button class="button primary" type="submit">Replace authorization</button>
+      </div>
+    </form>
+    <h3>History</h3>
+    <pre class="code-block">${escapeHtml(JSON.stringify(center.authorizationHistory || [], null, 2))}</pre>`);
+
+  $("#auth-create-challenge").addEventListener("click", async () => {
+    try {
+      const challenge = await api(`/v1/platform/workspaces/${state.workspaceId}/targets/${targetId}/domain-verification`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      $("#modal-content").innerHTML = `
+        <p class="muted">Create this DNS TXT record, wait for DNS propagation, then verify.</p>
+        <div class="detail-grid">
+          ${detail("TXT name", challenge.dnsName)}
+          ${detail("Expires", fmtDate(challenge.expiresAt))}
+        </div>
+        <pre class="code-block">${escapeHtml(challenge.challenge)}</pre>
+        <div class="form-actions"><button class="button primary" id="verify-dns-now">Verify DNS now</button></div>`;
+      $("#verify-dns-now").addEventListener("click", async () => {
+        try {
+          await api(`/v1/platform/workspaces/${state.workspaceId}/domain-verifications/${challenge.id}/verify`, {
+            method: "POST",
+            body: JSON.stringify({}),
+          });
+          toast("Domain ownership verified");
+          modal.close();
+          await render();
+        } catch (error) { toast(error.message, true); }
+      });
+    } catch (error) { toast(error.message, true); }
+  });
+
+  $("#auth-upgrade-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const base = new URL(center.target.base_url);
+    const capabilities = ["PUBLIC_HTTP_OBSERVE"];
+    if (form.get("browser")) capabilities.push("BROWSER_QA");
+    if (form.get("remediation")) capabilities.push("SOURCE_REMEDIATION");
+    try {
+      await api(`/v1/platform/workspaces/${state.workspaceId}/targets/${targetId}/authorization-center`, {
+        method: "POST",
+        body: JSON.stringify({
+          mode: form.get("mode"),
+          allowedHosts: [base.hostname],
+          allowedCapabilities: capabilities,
+          evidenceReference: form.get("evidenceReference") || null,
+          expiresAt: form.get("expiresAt") ? new Date(form.get("expiresAt")).toISOString() : null,
+        }),
+      });
+      toast("Authorization replaced");
+      modal.close();
+      await render();
+    } catch (error) { toast(error.message, true); }
+  });
+  $("#auth-revoke").addEventListener("click", async () => {
+    try {
+      await api(`/v1/platform/workspaces/${state.workspaceId}/targets/${targetId}/authorization/revoke`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      toast("Authorization revoked");
+      modal.close();
+      await render();
+    } catch (error) { toast(error.message, true); }
+  });
+}
+
+async function renderOperator() {
+  const data = await api("/v1/platform/admin/overview?limit=200");
+  content.innerHTML = `
+    <div class="grid metrics">
+      ${metric("Active workspaces", data.summary.active_workspaces, "Customer estates")}
+      ${metric("Active users", data.summary.active_users, "Platform accounts")}
+      ${metric("Pending approvals", data.summary.pending_approvals, "Across platform")}
+      ${metric("Failed jobs 24h", data.summary.failed_jobs_24h, "Needs attention")}
+    </div>
+    <div class="split">
+      ${tablePanel("Workspaces",["Workspace","Plan","Subscription","Targets","Members"],data.workspaces.map((item)=>[
+        `<div class="primary-text">${escapeHtml(item.name)}</div><div class="secondary-text">${escapeHtml(item.slug)}</div>`,
+        chip(item.plan),chip(item.subscription_status),escapeHtml(item.targets),escapeHtml(item.members)
+      ]),"No workspaces","No customer workspaces yet.")}
+      ${tablePanel("Fleet alerts",["Type","Workspace","Detail","Time"],data.alerts.map((item)=>[
+        chip(item.kind),escapeHtml(item.workspace_id || "—"),escapeHtml(item.detail || "—"),escapeHtml(fmtDate(item.occurred_at))
+      ]),"No alerts","Platform fleet is healthy.")}
+    </div>`;
 }
 
 async function renderFindings() {
@@ -445,14 +698,14 @@ function openTargetForm() {
       <div class="form-grid">
         <label>Organization<input name="organizationName" maxlength="240" required></label>
         <label>Base URL<input name="baseUrl" type="url" placeholder="https://example.com" required></label>
-        <label>Authorization mode<select name="mode"><option>PUBLIC_QA_ONLY</option><option>BUG_BOUNTY</option><option>CLIENT_AUTHORIZED</option><option>DO_NOT_TEST</option></select></label>
+        <label>Authorization mode<select name="mode"><option>PUBLIC_QA_ONLY</option><option>BUG_BOUNTY</option><option>DO_NOT_TEST</option></select></label>
         <label>Expires at<input name="expiresAt" type="datetime-local"></label>
         <label class="full">Scope notes<textarea name="scopeNotes" rows="3"></textarea></label>
         <label class="full">Evidence reference<input name="evidenceReference" maxlength="1000" placeholder="Contract, bounty program, ticket, or other authorization evidence"></label>
         <div class="full">
           <span class="eyebrow">Capabilities</span>
           <label><input name="browser" type="checkbox"> Browser QA</label>
-          <label><input name="remediation" type="checkbox"> Source remediation (client authorization still required)</label>
+          <span class="muted">Source remediation is unlocked from Authorization Center after DNS ownership verification.</span>
         </div>
       </div>
       <div class="form-actions"><button class="button" type="button" id="target-cancel">Cancel</button><button class="button primary" type="submit">Register target</button></div>
@@ -465,7 +718,6 @@ function openTargetForm() {
       const url = new URL(form.get("baseUrl"));
       const capabilities = ["PUBLIC_HTTP_OBSERVE"];
       if (form.get("browser")) capabilities.push("BROWSER_QA");
-      if (form.get("remediation")) capabilities.push("SOURCE_REMEDIATION");
       await api(`/v1/platform/workspaces/${state.workspaceId}/targets`,{
         method:"POST",
         body:JSON.stringify({
@@ -505,6 +757,7 @@ function openInviteForm() {
 
 function primaryAction() {
   if (["overview","targets"].includes(state.view)) return openTargetForm();
+  if (state.view === "launch" || state.view === "operator") return render();
   if (state.view === "team") return openInviteForm();
   if (state.view === "integrations") {
     document.dispatchEvent(new CustomEvent("open-integration-form"));
@@ -523,6 +776,24 @@ function signOut(notify=true) {
   if(notify) toast("Signed out");
 }
 
+$("#signup-form").addEventListener("submit",async(event)=>{
+  event.preventDefault();
+  try{
+    const result=await api("/v1/platform/auth/signup",{method:"POST",body:JSON.stringify({
+      email:$("#signup-email").value,
+      displayName:$("#signup-name").value,
+      password:$("#signup-password").value,
+      workspaceName:$("#signup-workspace").value,
+      workspaceSlug:$("#signup-slug").value || $("#signup-workspace").value,
+    })});
+    state.token=result.token;
+    state.workspaceId=result.workspace.id;
+    sessionStorage.setItem("mecord_session",state.token);
+    sessionStorage.setItem("mecord_workspace",state.workspaceId);
+    state.view="launch";
+    await boot();
+  }catch(error){toast(error.message,true);}
+});
 $("#login-form").addEventListener("submit",async(event)=>{
   event.preventDefault();
   try{
@@ -541,6 +812,8 @@ $("#bootstrap-form").addEventListener("submit",async(event)=>{
     state.token=payload.token;state.workspaceId=payload.workspace.id;sessionStorage.setItem("mecord_session",state.token);sessionStorage.setItem("mecord_workspace",state.workspaceId);await boot();
   }catch(error){toast(error.message,true);}
 });
+$("#show-signup").addEventListener("click",()=>{$("#login-form").classList.add("hidden");$("#signup-form").classList.remove("hidden");});
+$("#signup-back-login").addEventListener("click",()=>{$("#signup-form").classList.add("hidden");$("#login-form").classList.remove("hidden");});
 $("#show-bootstrap").addEventListener("click",()=>{$("#login-form").classList.add("hidden");$("#bootstrap-form").classList.remove("hidden");});
 $("#show-login").addEventListener("click",()=>{$("#bootstrap-form").classList.add("hidden");$("#login-form").classList.remove("hidden");});
 $("#workspace-select").addEventListener("change",async(event)=>{state.workspaceId=event.target.value;sessionStorage.setItem("mecord_workspace",state.workspaceId);await render();});

@@ -123,6 +123,14 @@ function normalizeTarget(body, badRequest) {
   const allowedCapabilities = Array.isArray(authorization.allowedCapabilities)
     ? [...new Set(authorization.allowedCapabilities)]
     : [];
+  if (
+    authorization.mode === AUTHORIZATION_MODES.CLIENT_AUTHORIZED ||
+    allowedCapabilities.includes(CAPABILITIES.SOURCE_REMEDIATION)
+  ) {
+    throw badRequest(
+      "self-serve targets must start non-destructive; verify domain ownership before upgrading to client-authorized source remediation",
+    );
+  }
   for (const capability of allowedCapabilities) {
     if (!Object.values(CAPABILITIES).includes(capability)) {
       throw badRequest(`unknown capability: ${capability}`);

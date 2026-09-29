@@ -21,6 +21,11 @@ import {
 import { handleMilestoneARoute } from "./milestone-a/routes.js";
 import { handleMilestoneBRoute } from "./milestone-b/routes.js";
 import { handleMilestoneCRoute } from "./milestone-c/routes.js";
+import {
+  handleMilestoneHPublicRoute,
+  handleMilestoneHPlatformRoute,
+  runMilestoneHMaintenance,
+} from "./milestone-h/routes.js";
 import { authenticatePlatformToken } from "./platform/auth.js";
 import {
   handlePlatformPublicRoute,
@@ -328,6 +333,17 @@ export function createServer({
 
       if (url.pathname.startsWith("/v1/platform/")) {
         const rawBearer = bearerToken(req);
+        const milestoneHPublicHandled = await handleMilestoneHPublicRoute({
+          req,
+          res,
+          url,
+          json,
+          readJson,
+          readRaw,
+          badRequest,
+        });
+        if (milestoneHPublicHandled !== false) return;
+
         const publicHandled = await handlePlatformPublicRoute({
           req,
           res,
@@ -355,6 +371,17 @@ export function createServer({
         });
         if (integrationHandled !== false) return;
 
+        const milestoneHPlatformHandled = await handleMilestoneHPlatformRoute({
+          req,
+          res,
+          url,
+          json,
+          readJson,
+          badRequest,
+          principal,
+        });
+        if (milestoneHPlatformHandled !== false) return;
+
         const platformHandled = await handlePlatformRoute({
           req,
           res,
@@ -378,6 +405,13 @@ export function createServer({
         url.pathname === "/v1/maintenance/platform"
       ) {
         return json(res, 200, await runPlatformMaintenance());
+      }
+
+      if (
+        req.method === "POST" &&
+        url.pathname === "/v1/maintenance/onboarding"
+      ) {
+        return json(res, 200, await runMilestoneHMaintenance());
       }
 
       const integrationWorkerHandled = await handleIntegrationWorkerRoute({

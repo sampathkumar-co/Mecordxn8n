@@ -91,3 +91,18 @@ It deliberately does **not**:
 - bypass cooldowns or activation caps.
 
 Any future delivery-provider workflow must consume only Control-API-approved action IDs and must record its result back through the commercial delivery endpoint. Policy remains in PostgreSQL/Control API, not n8n.
+
+
+## Onboarding finalization
+
+`workflows/onboarding-finalization.json` is inactive on import.
+
+When enabled by an operator it runs once per minute and calls the authenticated `POST /v1/maintenance/onboarding` endpoint. n8n does not decide whether an assessment is complete and does not release or share reports.
+
+The Control API/PostgreSQL layer:
+
+- identifies completed first-assessment jobs;
+- atomically claims onboarding rows;
+- generates a single READY report;
+- retries bounded finalization failures;
+- leaves external report release behind the canonical human approval gate.

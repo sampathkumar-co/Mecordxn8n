@@ -80,6 +80,7 @@ function publicUser(row) {
     email: row.email,
     displayName: row.display_name,
     status: row.status,
+    isPlatformOperator: Boolean(row.is_platform_operator),
   };
 }
 
@@ -142,9 +143,9 @@ export async function bootstrapPlatformOwner({
     const salt = randomBytes(24).toString("hex");
     const userResult = await client.query(
       `INSERT INTO platform_users (
-         email, display_name, password_salt, password_hash
+         email, display_name, password_salt, password_hash, is_platform_operator
        )
-       VALUES ($1,$2,$3,$4)
+       VALUES ($1,$2,$3,$4,true)
        RETURNING *`,
       [
         normalizedEmail,
@@ -195,6 +196,115 @@ export async function bootstrapPlatformOwner({
         plan: workspace.plan,
         status: workspace.status,
       },
+      ...session,
+    };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function registerSelfServeOwner({
+  email,
+  displayName,
+  password,
+  workspaceName,
+  workspaceSlug,
+  userAgent = "",
+}) {
+  const normalizedEmail = normalizeEmail(email);
+  const normalizedPassword = validatePassword(password);
+  const slug = normalizeSlug(workspaceSlug || workspaceName);
+  const name = String(workspaceName || "").trim().slice(0, 160);
+  const display = String(displayName || "").trim().slice(0, 160);
+  if (!name || !display) {
+    const error = new Error("displayName and workspaceName are required");
+    error.statusCode = 400;
+    error.code = "INVALID_SIGNUP";
+    throw error;
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const existing = await client.query(
+      "SELECT id FROM platform_users WHERE lower(email) = $1 FOR UPDATE",
+      [normalizedEmail],
+    );
+    if (existing.rowCount > 0) {
+      const error = new Error("account already exists");
+      error.statusCode = 409;
+      error.code = "ACCOUNT_EXISTS";
+      throw error;
+    }
+
+    const salt = randomBytes(24).toString("hex");
+    const userResult = await client.query(
+      `INSERT INTO platform_users (
+         email, display_name, password_salt, password_hash
+       )
+       VALUES ($1,$2,$3,$4)
+       RETURNING *`,
+      [
+        normalizedEmail,
+        display,
+        salt,
+        passwordDigest(normalizedPassword, salt),
+      ],
+    );
+    const user = userResult.rows[0];
+
+    const workspaceResult = await client.query(
+      `INSERT INTO workspaces (name, slug, plan, status)
+       VALUES ($1,$2,'TEAM','ACTIVE')
+       RETURNING *`,
+      [name, slug],
+    );
+    const workspace = workspaceResult.rows[0];
+
+    await client.query(
+      `INSERT INTO workspace_memberships (workspace_id, user_id, role)
+       VALUES ($1,$2,'OWNER')`,
+      [workspace.id, user.id],
+    );
+    await client.query(
+      `INSERT INTO workspace_subscriptions (
+         workspace_id, plan, status, seats, trial_ends_at
+       )
+       VALUES ($1,'TEAM','TRIALING',1,now() + interval '14 days')`,
+      [workspace.id],
+    );
+    await client.query(
+      `INSERT INTO workspace_onboarding (workspace_id, completed_steps)
+       VALUES ($1,ARRAY['ACCOUNT_CREATED']::text[])
+       ON CONFLICT (workspace_id) DO NOTHING`,
+      [workspace.id],
+    );
+    await client.query(
+      `INSERT INTO workspace_security_events (
+         workspace_id, user_id, event_type, severity, metadata
+       )
+       VALUES (
+         $1,$2,'SELF_SERVE_SIGNUP','INFO',
+         jsonb_build_object('trialDays',14)
+       )`,
+      [workspace.id, user.id],
+    );
+
+    const session = await issueSession(client, user, userAgent);
+    await client.query("COMMIT");
+    return {
+      user: publicUser(user),
+      workspace: {
+        id: workspace.id,
+        name: workspace.name,
+        slug: workspace.slug,
+        plan: workspace.plan,
+        status: workspace.status,
+      },
+      trialEndsAt: new Date(Date.now() + 14 * 86400000).toISOString(),
       ...session,
     };
   } catch (error) {
@@ -471,7 +581,7 @@ export async function authenticatePlatformToken(token) {
   if (raw.startsWith(SESSION_PREFIX)) {
     const result = await pool.query(
       `SELECT s.id AS principal_id, s.user_id, s.expires_at,
-              u.email, u.display_name, u.status
+              u.email, u.display_name, u.status, u.is_platform_operator
          FROM platform_sessions s
          JOIN platform_users u ON u.id = s.user_id
         WHERE s.token_hash = $1
@@ -493,6 +603,7 @@ export async function authenticatePlatformToken(token) {
         id: result.rows[0].user_id,
         email: result.rows[0].email,
         displayName: result.rows[0].display_name,
+        isPlatformOperator: Boolean(result.rows[0].is_platform_operator),
       },
       rateLimitPerHour: 4000,
     };
@@ -544,28 +655,63 @@ export async function consumePlatformRateLimit(principal) {
 export async function getWorkspaceAccess(principal, workspaceId) {
   if (principal.kind === "API_KEY") {
     if (principal.workspaceId !== workspaceId) return null;
+    const workspace = await pool.query(
+      `SELECT w.status, w.plan,
+              COALESCE(s.status,'ACTIVE') AS subscription_status,
+              s.trial_ends_at
+         FROM workspaces w
+         LEFT JOIN workspace_subscriptions s ON s.workspace_id = w.id
+        WHERE w.id = $1
+          AND w.status = 'ACTIVE'`,
+      [workspaceId],
+    );
+    if (workspace.rowCount === 0) return null;
+    const row = workspace.rows[0];
+    const subscriptionUsable =
+      row.subscription_status === "ACTIVE" ||
+      (
+        row.subscription_status === "TRIALING" &&
+        (!row.trial_ends_at || new Date(row.trial_ends_at).getTime() > Date.now())
+      );
     return {
       workspaceId,
       role: "API_KEY",
       scopes: principal.scopes || [],
+      plan: row.plan,
+      subscriptionStatus: row.subscription_status,
+      trialEndsAt: row.trial_ends_at,
+      subscriptionUsable,
     };
   }
 
   const result = await pool.query(
-    `SELECT m.workspace_id, m.role, w.status, w.plan
+    `SELECT m.workspace_id, m.role, w.status, w.plan,
+            COALESCE(s.status,'ACTIVE') AS subscription_status,
+            s.trial_ends_at
        FROM workspace_memberships m
        JOIN workspaces w ON w.id = m.workspace_id
+       LEFT JOIN workspace_subscriptions s ON s.workspace_id = w.id
       WHERE m.workspace_id = $1
         AND m.user_id = $2
         AND w.status = 'ACTIVE'`,
     [workspaceId, principal.userId],
   );
   if (result.rowCount === 0) return null;
+  const row = result.rows[0];
+  const subscriptionUsable =
+    row.subscription_status === "ACTIVE" ||
+    (
+      row.subscription_status === "TRIALING" &&
+      (!row.trial_ends_at || new Date(row.trial_ends_at).getTime() > Date.now())
+    );
   return {
     workspaceId,
-    role: result.rows[0].role,
+    role: row.role,
     scopes: [],
-    plan: result.rows[0].plan,
+    plan: row.plan,
+    subscriptionStatus: row.subscription_status,
+    trialEndsAt: row.trial_ends_at,
+    subscriptionUsable,
   };
 }
 
@@ -581,6 +727,14 @@ export function accessAllows(access, {
   apiScope = "workspace:read",
 } = {}) {
   if (!access) return false;
+  const operationalWrite = [
+    "targets:write",
+    "approvals:write",
+    "integrations:write",
+  ].includes(apiScope);
+  if (operationalWrite && access.subscriptionUsable === false) {
+    return false;
+  }
   if (access.role === "API_KEY") {
     return access.scopes.includes("*") || access.scopes.includes(apiScope);
   }

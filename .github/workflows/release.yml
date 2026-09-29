@@ -35,7 +35,18 @@ jobs:
       RESTORE_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/mecordxn8n_restore
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
       PLATFORM_MASTER_KEY: release-gate-master-key-must-be-at-least-32-characters
-      BOOTSTRAP_TOKEN: release-gate-bootstrap-token
+      BOOTSTRAP_TOKEN: release-gate-bootstrap-token-with-32-characters
+      POSTGRES_DB: mecordxn8n_release
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: release-gate-postgres-password-with-32-characters
+      ORCHESTRATOR_TOKEN: release-gate-orchestrator-token-with-32-characters
+      WORKER_TOKEN: release-gate-worker-token-with-at-least-32-characters
+      WORKER_TRIGGER_TOKEN: release-gate-trigger-token-with-at-least-32-characters
+      N8N_ENCRYPTION_KEY: release-gate-n8n-key-with-at-least-32-characters
+      APP_DOMAIN: app.example.test
+      N8N_DOMAIN: n8n.example.test
+      ACME_EMAIL: ops@example.test
+      PUBLIC_APP_URL: https://app.example.test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -68,10 +79,14 @@ jobs:
         run: createdb -h 127.0.0.1 -U postgres mecordxn8n_restore
       - name: Restore verification
         run: node scripts/restore-verify.mjs artifacts/database.backup
+      - name: Production preflight
+        run: node scripts/production-preflight.mjs
       - name: Release certification
         run: node scripts/release-certify.mjs
       - name: Validate Docker Compose
-        run: docker compose --env-file .env.example config >/dev/null
+        run: |
+          docker compose --env-file .env.example config >/dev/null
+          docker compose --env-file .env.example -f docker-compose.yml -f docker-compose.production.yml config >/dev/null
       - name: Build production images
         run: |
           docker build -t mecordxn8n-control:release .

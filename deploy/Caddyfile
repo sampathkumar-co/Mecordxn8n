@@ -1,0 +1,19 @@
+{
+  email {$ACME_EMAIL}
+}
+
+{$APP_DOMAIN} {
+  encode zstd gzip
+  header {
+    Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    X-Frame-Options "DENY"
+    X-Content-Type-Options "nosniff"
+    Referrer-Policy "no-referrer"
+  }
+  reverse_proxy control-api:8080
+}
+
+{$N8N_DOMAIN} {
+  encode zstd gzip
+  reverse_proxy n8n:5678
+}

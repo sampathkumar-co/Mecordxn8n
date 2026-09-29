@@ -2,6 +2,11 @@ import dns from "node:dns/promises";
 import { createHash } from "node:crypto";
 
 import { CAPABILITIES } from "../authorization.js";
+import {
+  completeJob,
+  leaseJob,
+  recordFinding,
+} from "./control-client.js";
 import { isPublicAddress } from "./public-http.js";
 
 const MAX_EVENTS = 25;
@@ -19,7 +24,8 @@ function hash(parts) {
 
 function sameSiteHost(targetUrl, candidateUrl) {
   try {
-    return new URL(targetUrl).hostname.toLowerCase() === new URL(candidateUrl).hostname.toLowerCase();
+    return new URL(targetUrl).hostname.toLowerCase() ===
+      new URL(candidateUrl).hostname.toLowerCase();
   } catch {
     return false;
   }
@@ -80,7 +86,11 @@ export function buildBrowserFindings(observation) {
   for (const event of observation.pageErrors || []) {
     const message = compactText(event.message);
     findings.push({
-      fingerprint: hash(["browser-page-error", new URL(targetUrl).hostname, message]),
+      fingerprint: hash([
+        "browser-page-error",
+        new URL(targetUrl).hostname,
+        message,
+      ]),
       category: "browser-runtime",
       title: "Browser runtime error",
       severity: "MEDIUM",
@@ -97,7 +107,11 @@ export function buildBrowserFindings(observation) {
   for (const event of observation.consoleErrors || []) {
     const message = compactText(event.text);
     findings.push({
-      fingerprint: hash(["browser-console-error", new URL(targetUrl).hostname, message]),
+      fingerprint: hash([
+        "browser-console-error",
+        new URL(targetUrl).hostname,
+        message,
+      ]),
       category: "browser-console",
       title: "Console error on public page",
       severity: "LOW",
@@ -112,6 +126,7 @@ export function buildBrowserFindings(observation) {
 
   for (const event of observation.httpErrors || []) {
     if (!sameSiteHost(targetUrl, event.url)) continue;
+
     const parsed = new URL(event.url);
     findings.push({
       fingerprint: hash([
@@ -135,6 +150,7 @@ export function buildBrowserFindings(observation) {
 
   for (const event of observation.requestFailures || []) {
     if (!sameSiteHost(targetUrl, event.url)) continue;
+
     const parsed = new URL(event.url);
     findings.push({
       fingerprint: hash([
@@ -162,6 +178,7 @@ export function buildBrowserFindings(observation) {
       unique.set(finding.fingerprint, finding);
     }
   }
+
   return [...unique.values()].slice(0, MAX_EVENTS);
 }
 
@@ -249,6 +266,7 @@ export async function auditBrowserPage(
 
   await page.route("**/*", async (route) => {
     const request = route.request();
+
     try {
       await assertBrowserRequestAllowed(request.url(), request.method(), {
         lookup,
@@ -269,14 +287,17 @@ export async function auditBrowserPage(
       timeout: timeoutMs,
     });
 
-    // Let synchronous hydration/runtime errors surface, without interacting.
+    // Surface initial hydration/runtime problems without interacting with the page.
     await page.waitForTimeout(750);
 
     const finalUrl = page.url();
     const requestedHost = new URL(requestedUrl).hostname.toLowerCase();
     const finalHost = new URL(finalUrl).hostname.toLowerCase();
+
     if (finalHost !== requestedHost) {
-      const error = new Error("browser navigation redirected outside the authorized host");
+      const error = new Error(
+        "browser navigation redirected outside the authorized host",
+      );
       error.code = "BROWSER_REDIRECT_OUT_OF_SCOPE";
       throw error;
     }
@@ -300,35 +321,15 @@ export async function auditBrowserPage(
   }
 }
 
-async function apiRequest(baseUrl, workerToken, path, body) {
-  const response = await fetch(`${baseUrl}${path}`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${workerToken}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (response.status === 204) return null;
-
-  const payload = await response.json();
-  if (!response.ok) {
-    const error = new Error(`control API returned ${response.status}`);
-    error.code = payload.error || "CONTROL_API_ERROR";
-    error.payload = payload;
-    throw error;
-  }
-  return payload;
-}
-
 export async function runBrowserQaOnce({
   controlApiUrl,
   workerToken,
   workerId = "browser-qa-worker",
   audit = auditBrowserPage,
 }) {
-  const job = await apiRequest(controlApiUrl, workerToken, "/v1/worker/jobs/lease", {
+  const job = await leaseJob({
+    controlApiUrl,
+    workerToken,
     workerId,
     capabilities: [CAPABILITIES.BROWSER_QA],
     leaseSeconds: 120,
@@ -342,27 +343,26 @@ export async function runBrowserQaOnce({
     const findings = buildBrowserFindings(observation);
 
     for (const finding of findings) {
-      await apiRequest(
+      await recordFinding({
         controlApiUrl,
         workerToken,
-        `/v1/worker/jobs/${job.id}/findings`,
-        { workerId, finding },
-      );
+        workerId,
+        jobId: job.id,
+        finding,
+      });
     }
 
-    const completed = await apiRequest(
+    const completed = await completeJob({
       controlApiUrl,
       workerToken,
-      `/v1/worker/jobs/${job.id}/complete`,
-      {
-        workerId,
-        state: "SUCCEEDED",
-        output: {
-          observation,
-          findingsRecorded: findings.length,
-        },
+      workerId,
+      jobId: job.id,
+      state: "SUCCEEDED",
+      output: {
+        observation,
+        findingsRecorded: findings.length,
       },
-    );
+    });
 
     return {
       state: "PROCESSED",
@@ -372,22 +372,21 @@ export async function runBrowserQaOnce({
     };
   } catch (error) {
     try {
-      await apiRequest(
+      await completeJob({
         controlApiUrl,
         workerToken,
-        `/v1/worker/jobs/${job.id}/complete`,
-        {
-          workerId,
-          state: "FAILED",
-          error: {
-            code: error.code || "BROWSER_QA_FAILED",
-            message: compactText(error.message),
-          },
+        workerId,
+        jobId: job.id,
+        state: "FAILED",
+        error: {
+          code: error.code || "BROWSER_QA_FAILED",
+          message: compactText(error.message),
         },
-      );
+      });
     } catch {
       // Never force completion after lease loss/expiry.
     }
+
     throw error;
   }
 }

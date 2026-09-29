@@ -1,4 +1,6 @@
 import fs from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import pg from "pg";
 
 const { Pool } = pg;
@@ -8,14 +10,19 @@ if (!process.env.DATABASE_URL) {
 }
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const migrationsDir = path.join(root, "db", "migrations");
 
 try {
-  const sql = await fs.readFile(
-    new URL("../db/migrations/001_initial.sql", import.meta.url),
-    "utf8",
-  );
-  await pool.query(sql);
-  console.log("database migration applied");
+  const files = (await fs.readdir(migrationsDir))
+    .filter((name) => name.endsWith(".sql"))
+    .sort();
+
+  for (const file of files) {
+    const sql = await fs.readFile(path.join(migrationsDir, file), "utf8");
+    await pool.query(sql);
+    console.log(`database migration applied: ${file}`);
+  }
 } finally {
   await pool.end();
 }

@@ -215,7 +215,7 @@ export async function createDomainVerification({
        )
        VALUES (
          $1,'DOMAIN_VERIFICATION_CREATED','INFO',
-         jsonb_build_object('targetId',$2,'hostname',$3)
+         jsonb_build_object('targetId',$2::text,'hostname',$3::text)
        )`,
       [workspaceId, targetId, hostname],
     );

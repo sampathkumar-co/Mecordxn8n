@@ -12,6 +12,8 @@ const SESSION_TTL_HOURS = 12;
 const INVITE_TTL_HOURS = 72;
 const SESSION_PREFIX = "mcs_";
 const API_KEY_PREFIX = "mck_";
+const DUMMY_PASSWORD_SALT =
+  "000000000000000000000000000000000000000000000000";
 
 function sha256(value) {
   return createHash("sha256").update(String(value)).digest("hex");
@@ -333,11 +335,13 @@ export async function loginPlatformUser({
     );
 
     if (result.rowCount === 0) {
+      passwordDigest(normalizedPassword, DUMMY_PASSWORD_SALT);
       await client.query("ROLLBACK");
       return null;
     }
 
     const user = result.rows[0];
+    const digest = passwordDigest(normalizedPassword, user.password_salt);
     if (
       user.status !== "ACTIVE" ||
       (user.locked_until && new Date(user.locked_until).getTime() > Date.now())
@@ -345,8 +349,6 @@ export async function loginPlatformUser({
       await client.query("COMMIT");
       return null;
     }
-
-    const digest = passwordDigest(normalizedPassword, user.password_salt);
     if (!safeHexEqual(digest, user.password_hash)) {
       const failures = Number(user.failed_login_count || 0) + 1;
       await client.query(

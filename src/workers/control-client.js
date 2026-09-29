@@ -67,3 +67,101 @@ export async function completeJob({
     { workerId, state, output, error },
   );
 }
+
+export async function workerApiGet(baseUrl, workerToken, path) {
+  const response = await fetch(`${baseUrl}${path}`, {
+    headers: { Authorization: `Bearer ${workerToken}` },
+  });
+  const payload = response.status === 204 ? null : await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(`control API returned ${response.status}`);
+    error.code = payload?.error || "CONTROL_API_ERROR";
+    error.payload = payload;
+    throw error;
+  }
+  return payload;
+}
+
+export function getFindingContext({ controlApiUrl, workerToken, findingId }) {
+  return workerApiGet(
+    controlApiUrl,
+    workerToken,
+    `/v1/worker/milestone-a/findings/${findingId}`,
+  );
+}
+
+export function recordVerification({
+  controlApiUrl,
+  workerToken,
+  jobId,
+  workerId,
+  findingId,
+  status,
+  attempts,
+  matchedAttempts,
+  confidence,
+  evidence,
+  artifacts,
+  intelligence,
+}) {
+  return workerApiRequest(
+    controlApiUrl,
+    workerToken,
+    `/v1/worker/milestone-a/jobs/${jobId}/verification`,
+    {
+      workerId,
+      findingId,
+      status,
+      attempts,
+      matchedAttempts,
+      confidence,
+      evidence,
+      artifacts,
+      intelligence,
+    },
+  );
+}
+
+export function recordPages({ controlApiUrl, workerToken, jobId, workerId, pages }) {
+  return workerApiRequest(
+    controlApiUrl,
+    workerToken,
+    `/v1/worker/milestone-a/jobs/${jobId}/pages`,
+    { workerId, pages },
+  );
+}
+
+export function recordJourneyRun({
+  controlApiUrl,
+  workerToken,
+  jobId,
+  workerId,
+  name,
+  state,
+  steps,
+  evidence,
+}) {
+  return workerApiRequest(
+    controlApiUrl,
+    workerToken,
+    `/v1/worker/milestone-a/jobs/${jobId}/journey-run`,
+    { workerId, name, state, steps, evidence },
+  );
+}
+
+export function recordRemediationResult({
+  controlApiUrl,
+  workerToken,
+  jobId,
+  workerId,
+  status,
+  mcpRequestId,
+  mcpResult,
+}) {
+  return workerApiRequest(
+    controlApiUrl,
+    workerToken,
+    `/v1/worker/milestone-a/jobs/${jobId}/remediation-result`,
+    { workerId, status, mcpRequestId, mcpResult },
+  );
+}

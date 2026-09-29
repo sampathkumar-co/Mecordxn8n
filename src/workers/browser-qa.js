@@ -286,6 +286,24 @@ async function collectDomEvidence(page) {
       ),
       linkCount: document.links.length,
       formCount: document.forms.length,
+      internalLinks: [...document.links]
+        .map((link) => link.href)
+        .filter((href) => {
+          try {
+            const url = new URL(href, location.href);
+            return ["http:", "https:"].includes(url.protocol) &&
+              url.origin === location.origin;
+          } catch {
+            return false;
+          }
+        })
+        .map((href) => {
+          const url = new URL(href, location.href);
+          url.hash = "";
+          return url.toString();
+        })
+        .filter((value, index, values) => values.indexOf(value) === index)
+        .slice(0, 100),
       performance: {
         domContentLoadedMs: navigation?.domContentLoadedEventEnd || null,
         loadEventMs: navigation?.loadEventEnd || null,

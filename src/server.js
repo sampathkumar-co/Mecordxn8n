@@ -18,6 +18,7 @@ import {
   recordDeniedJob,
   upsertFindingFromLease,
 } from "./repository.js";
+import { handleMilestoneARoute } from "./milestone-a/routes.js";
 
 const MAX_BODY_BYTES = 256 * 1024;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -267,6 +268,16 @@ export function createServer({
         return json(res, 401, { error: "UNAUTHORIZED" });
       }
 
+      const milestoneAHandled = await handleMilestoneARoute({
+        req,
+        res,
+        url,
+        json,
+        readJson,
+        badRequest,
+      });
+      if (milestoneAHandled !== false) return;
+
       if (req.method === "POST" && url.pathname === "/v1/worker/jobs/lease") {
         const body = normalizeLeaseInput(await readJson(req));
         const job = await leaseNextJob(body);
@@ -356,7 +367,7 @@ export function createServer({
     } catch (error) {
       const statusCode = error.statusCode || 500;
       return json(res, statusCode, {
-        error: statusCode >= 500 ? "INTERNAL_ERROR" : "BAD_REQUEST",
+        error: statusCode >= 500 ? "INTERNAL_ERROR" : (error.code || "BAD_REQUEST"),
         message: statusCode >= 500 ? "unexpected server error" : error.message,
       });
     }

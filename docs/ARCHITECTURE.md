@@ -200,3 +200,44 @@ Regression state is compared with the most recent non-regressed baseline/healthy
 Repair intelligence crosses clients only after Control API sanitization. Symptom material and root-cause keys are hashed; result structure is reduced to bounded type/count metadata. Worker-supplied raw fields are discarded.
 
 For remediation, human approval is necessary but not sufficient: the finding must still be verified and current CLIENT_AUTHORIZED scope must still permit SOURCE_REMEDIATION. Lease heartbeat loss aborts the MCP client request; authorization invalidation cancels queued and running jobs and clears their leases.
+
+## Milestone C commercial trust boundary
+
+Milestone C adds commercial state without changing the security authorization boundary used by QA/remediation.
+
+### Consent is separate from target authorization
+
+A target being safe to inspect does not authorize contacting a person. Commercial activation therefore requires a separate contact record with current `OPTED_IN` or `CLIENT_RELATIONSHIP` consent. Unknown, expired, opted-out, suppressed, or do-not-contact records fail closed.
+
+Consent withdrawal locks the contact before actions, blocks draft/pending/approved actions, and expires pending outbound approvals. Delivery and response paths lock contact/action rows in the same order to avoid consent/delivery deadlocks.
+
+### Outbound approval is necessary but not sufficient
+
+`OUTBOUND_CONTACT` reuses the canonical `approval_requests` table. A human approval does not bypass:
+
+- contact consent/suppression,
+- released-report status,
+- target/contact/report context binding,
+- per-contact cooldown,
+- per-target UTC-day activation cap.
+
+The policy row is locked while activation is checked so concurrent approvals cannot exceed the daily cap.
+
+This repository contains no email/WhatsApp/phone provider dispatcher. An approved action is a durable handoff that may later be delivered manually or by a separately configured provider integration; the delivery result is recorded explicitly.
+
+### Commercial and revenue truth
+
+Commercial opportunities are anchored to latest-verified findings. The pipeline can be managed through normal states, but `WON` is reserved for confirmed received revenue.
+
+Revenue records:
+
+- use positive integer minor units;
+- keep a single currency per opportunity;
+- require external references for received/refunded money;
+- reject idempotency-key replays whose immutable amount/currency differs.
+
+Recurring service agreements require positive net received revenue before activation. Cancelled/ended service states are terminal.
+
+### n8n role
+
+The inactive `commercial-maintenance.json` workflow calls the Control API every 15 minutes to retrieve due follow-ups, renewals, and approved manual actions. It neither grants approval nor sends external messages.

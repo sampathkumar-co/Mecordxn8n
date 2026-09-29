@@ -284,7 +284,7 @@ export async function recordMonitoringRunFromLease({
     await client.query("BEGIN");
 
     const jobResult = await client.query(
-      `SELECT id, target_id
+      `SELECT id, target_id, input
          FROM jobs
         WHERE id = $1
           AND state = 'RUNNING'
@@ -298,6 +298,10 @@ export async function recordMonitoringRunFromLease({
       return null;
     }
     const job = jobResult.rows[0];
+    if (job.input?.monitoringPolicyId !== policyId) {
+      await client.query("ROLLBACK");
+      return null;
+    }
 
     const policyResult = await client.query(
       `SELECT * FROM monitoring_policies
@@ -459,7 +463,7 @@ export async function recordMonitoringFailure({
   error,
 }) {
   const lease = await getActiveLease(jobId, workerId);
-  if (!lease) return null;
+  if (!lease || lease.input?.monitoringPolicyId !== policyId) return null;
 
   const policy = await pool.query(
     `SELECT id FROM monitoring_policies
@@ -711,6 +715,18 @@ export async function markReportApproved(reportId) {
       WHERE id = $1 AND status = 'READY'
       RETURNING id, target_id, kind, status, markdown, summary, created_at`,
     [reportId],
+  );
+  return result.rows[0] || null;
+}
+
+export async function getRemediationRequestForJob(jobId) {
+  const result = await pool.query(
+    `SELECT id, target_id, finding_id, job_id, project_root, status,
+            mcp_request_id, mcp_result, created_at, completed_at
+       FROM remediation_requests
+      WHERE job_id = $1
+      LIMIT 1`,
+    [jobId],
   );
   return result.rows[0] || null;
 }

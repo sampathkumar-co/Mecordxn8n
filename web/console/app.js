@@ -5,6 +5,7 @@ import {
   pathForView,
 } from "/console/core/router.js";
 import { renderFindingDetailView } from "/console/views/finding-detail.js";
+import { renderHomeView } from "/console/views/home.js";
 
 const state = {
   token: sessionStorage.getItem("mecord_session") || "",
@@ -282,47 +283,14 @@ async function render() {
 }
 
 async function renderOverview() {
-  const data = await api(`/v1/platform/workspaces/${state.workspaceId}/overview`);
-  const revenue = Object.entries(data.revenueByCurrency || {})
-    .map(([currency, row]) => `${currency} ${fmtMoney(row.netReceivedMinor, currency)}`)
-    .join(" · ") || "No received revenue yet";
-  const pipelineCount = Object.values(data.pipeline || {}).reduce((sum, n) => sum + Number(n || 0), 0);
-  content.innerHTML = `
-    <div class="grid metrics">
-      ${metric("Targets", data.targets, "Authorized estates")}
-      ${metric("Verified findings", data.findings?.verified || 0, `${data.findings?.high_open || 0} high open`)}
-      ${metric("Pending approvals", data.pendingApprovals, "Human decision queue")}
-      ${metric("Open regressions", data.openRegressions, "Continuous monitoring")}
-    </div>
-    <div class="split">
-      <section class="panel">
-        <div class="panel-header"><h2>Operating pulse</h2><span class="chip ${data.jobs?.dead_letter ? "danger" : "good"}">${data.jobs?.dead_letter || 0} dead-letter</span></div>
-        <div class="panel-body detail-grid">
-          ${detail("Jobs, last 24h", data.jobs?.last_24h || 0)}
-          ${detail("Jobs running", data.jobs?.running || 0)}
-          ${detail("Commercial opportunities", pipelineCount)}
-          ${detail("Active services", data.services?.active || 0)}
-          ${detail("Renewals due ≤ 7d", data.services?.renewals_due || 0)}
-          ${detail("Security events, 24h", data.securityEvents24h || 0)}
-        </div>
-      </section>
-      <section class="panel">
-        <div class="panel-header"><h2>Revenue</h2><span class="chip neutral">Recorded cash</span></div>
-        <div class="panel-body">
-          <div class="primary-text">${escapeHtml(revenue)}</div>
-          <p class="muted">Revenue becomes truth only after recorded payment evidence; pipeline state alone cannot mark an opportunity won.</p>
-        </div>
-      </section>
-    </div>
-    <section class="panel" style="margin-top:14px">
-      <div class="panel-header"><h2>Workspace boundary</h2><span class="chip good">${escapeHtml(data.workspace?.plan || "—")}</span></div>
-      <div class="panel-body detail-grid">
-        ${detail("Workspace", data.workspace?.name)}
-        ${detail("Subscription", data.workspace?.subscriptionStatus)}
-        ${detail("Retention", `${data.workspace?.retentionDays || "—"} days`)}
-        ${detail("Role", currentWorkspace()?.role || "API key")}
-      </div>
-    </section>`;
+  await renderHomeView({
+    container: content,
+    api,
+    workspaceId: state.workspaceId,
+    fmtDate,
+    fmtMoney,
+    navigate: (path) => navigateConsole(path),
+  });
 }
 
 function metric(label, value, meta) {

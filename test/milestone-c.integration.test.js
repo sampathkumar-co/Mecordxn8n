@@ -386,29 +386,26 @@ test(
       { method: "POST", body: { requestedBy: "owner" } },
     );
     assert.equal(followupApproval.status, 202);
-    const followupApproved = await request(
-      `/v1/approvals/${followupApproval.body.approval.id}/approve`,
-      { method: "POST", body: { decidedBy: "owner" } },
-    );
-    assert.equal(followupApproved.status, 201);
-
     const optOut = await request(
-      `/v1/commercial-contacts/${unknown.id}/consent`,
+      `/v1/outbound-actions/${action.id}/responses`,
       {
         method: "POST",
         body: {
-          consentState: "OPTED_OUT",
-          consentSource: "recipient-response",
-          consentEvidence: "explicit-stop",
-          suppressionReason: "recipient requested no further contact",
+          responseType: "OPTED_OUT",
+          summary: "Recipient requested no further contact.",
         },
       },
     );
-    assert.equal(optOut.status, 200);
-    assert.equal(optOut.body.consentState, "OPTED_OUT");
+    assert.equal(optOut.status, 201);
 
     const blocked = await request(`/v1/outbound-actions/${followup.id}`);
     assert.equal(blocked.body.state, "BLOCKED");
+
+    const expiredApproval = await request(
+      `/v1/approvals/${followupApproval.body.approval.id}`,
+    );
+    assert.equal(expiredApproval.status, 200);
+    assert.equal(expiredApproval.body.status, "EXPIRED");
 
     const sendAfterOptOut = await request(
       `/v1/outbound-actions/${followup.id}/record-delivery`,
@@ -584,6 +581,21 @@ test(
     );
     assert.equal(replay.status, 200);
     assert.equal(replay.body.idempotent, true);
+
+    const conflictingReplay = await request(
+      `/v1/commercial-opportunities/${opportunity.id}/revenue`,
+      {
+        method: "POST",
+        body: {
+          kind: "RECEIVED",
+          amountMinor: 80001,
+          currency: "INR",
+          externalReference: "payment-1",
+        },
+      },
+    );
+    assert.equal(conflictingReplay.status, 409);
+    assert.equal(conflictingReplay.body.error, "IDEMPOTENCY_CONFLICT");
 
     const won = await request(
       `/v1/commercial-opportunities/${opportunity.id}`,

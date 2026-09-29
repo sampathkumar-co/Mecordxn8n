@@ -363,6 +363,8 @@ export async function createRemediationRequest({
        target_id, finding_id, job_id, project_root
      )
      VALUES ($1,$2,$3,$4)
+     ON CONFLICT (job_id)
+     DO UPDATE SET project_root = remediation_requests.project_root
      RETURNING *`,
     [targetId, findingId, jobId, projectRoot],
   );

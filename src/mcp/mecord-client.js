@@ -10,7 +10,7 @@ export class MecordMcpClient {
     this.nextId = 1;
   }
 
-  async #post(payload) {
+  async #post(payload, { signal } = {}) {
     const headers = {
       "content-type": "application/json",
       accept: "application/json, text/event-stream",
@@ -22,6 +22,7 @@ export class MecordMcpClient {
       method: "POST",
       headers,
       body: JSON.stringify(payload),
+      signal,
     });
 
     if (!response.ok) {
@@ -42,7 +43,7 @@ export class MecordMcpClient {
     return JSON.parse(jsonLine || text);
   }
 
-  async initialize() {
+  async initialize({ signal } = {}) {
     if (this.sessionId) return;
     await this.#post({
       jsonrpc: "2.0",
@@ -53,22 +54,22 @@ export class MecordMcpClient {
         capabilities: {},
         clientInfo: { name: "mecordxn8n", version: "0.1.0" },
       },
-    });
+    }, { signal });
     await this.#post({
       jsonrpc: "2.0",
       method: "notifications/initialized",
       params: {},
-    });
+    }, { signal });
   }
 
-  async callTool(name, args) {
-    await this.initialize();
+  async callTool(name, args, { signal } = {}) {
+    await this.initialize({ signal });
     const response = await this.#post({
       jsonrpc: "2.0",
       id: this.nextId++,
       method: "tools/call",
       params: { name, arguments: args },
-    });
+    }, { signal });
 
     if (response?.error) {
       throw new Error(response.error.message || "Mecord MCP tool call failed");
@@ -76,7 +77,12 @@ export class MecordMcpClient {
     return response?.result ?? response;
   }
 
-  async submitRemediation({ finding, projectRoot, repairPatterns = [] }) {
+  async submitRemediation({
+    finding,
+    projectRoot,
+    repairPatterns = [],
+    signal,
+  }) {
     const requestId = randomUUID();
     const objective =
       `Diagnose and remediate the verified website defect "${finding.title}" affecting ${finding.affectedUrl}. ` +
@@ -110,6 +116,7 @@ export class MecordMcpClient {
           evidence: finding.evidence,
         },
       },
+      { signal },
     );
 
     return { requestId, result };

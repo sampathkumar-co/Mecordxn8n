@@ -151,3 +151,17 @@ The remediation worker requires a real authorized Mecord Streamable HTTP MCP end
 Public QA remains non-interactive: no clicking, typing, form submission, login automation, destructive methods, non-web ports, private/reserved destinations, or out-of-scope navigation.
 
 Security-capable work remains limited to explicitly authorized client/bounty scope. No proposal/report is automatically delivered to a third party.
+
+## Milestone B hardening guarantees
+
+Milestone B is enforced at the Control API/PostgreSQL boundary, not by trusting n8n or workers.
+
+- Monitoring policies are claimed with row locks and are single-flight per policy while a monitor job is queued or running.
+- Monitoring cost is derived server-side from the authorized capability. Successful and terminal failed runs are counted once against a UTC-day policy budget.
+- Dead-lettered monitor jobs that could not report their own failure are reconciled into one bounded `FAILED` monitoring run.
+- Regression comparison anchors to the latest `BASELINE`/`HEALTHY` snapshot. Persistent signals keep one stable fingerprint; partial recovery resolves only the signals that recovered.
+- Repair memory is sanitized again by the Control API. Raw source, paths, URLs, errors, credentials, client identifiers, MCP response values, and raw MCP object keys are not accepted into cross-client memory.
+- Source remediation approval replay is idempotent under concurrency. Current authorization is revalidated before queueing, and running jobs are cancelled when authorization becomes invalid.
+- Remediation workers renew their lease before and during Mecord execution. Lease/authorization loss aborts the client-side MCP request.
+- `GET /livez` is process liveness. `GET /healthz` is database-backed readiness.
+- Migration `005_milestone_b_hardening.sql` adds the budget bound and indexes/uniqueness used by these guarantees.

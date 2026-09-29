@@ -9,6 +9,7 @@ import {
 import {
   extractRepairLearning,
   repairPatternKey,
+  sanitizeRepairLearning,
 } from "../src/milestone-b/repair-intelligence.js";
 
 test("HTTP monitoring detects availability and latency regressions", () => {
@@ -99,4 +100,77 @@ test("repair pattern key is stable for the same symptom", () => {
   assert.equal(learning.lessons.rawClientDataStored, false);
   assert.match(learning.symptomSignature, /^sha256:/);
   assert.equal(JSON.stringify(learning).includes("fixed and tested"), false);
+});
+
+test("console regressions use stable signal fingerprints", () => {
+  const baseObservation = {
+    mainStatus: 200,
+    durationMs: 300,
+    title: "App",
+    pageErrors: [],
+    httpErrors: [],
+    requestFailures: [],
+    dom: { brokenImageCount: 0, horizontalOverflowPx: 0, performance: {} },
+  };
+  const baseline = normalizeMonitoringSnapshot("BROWSER_QA", {
+    ...baseObservation,
+    consoleErrors: [],
+  });
+  const one = normalizeMonitoringSnapshot("BROWSER_QA", {
+    ...baseObservation,
+    consoleErrors: [{ text: "first" }],
+  });
+  const two = normalizeMonitoringSnapshot("BROWSER_QA", {
+    ...baseObservation,
+    consoleErrors: [{ text: "first" }, { text: "second" }],
+  });
+
+  const first = compareSnapshots(baseline, one)
+    .find((item) => item.signal === "consoleErrorCount");
+  const second = compareSnapshots(baseline, two)
+    .find((item) => item.signal === "consoleErrorCount");
+  assert.ok(first);
+  assert.ok(second);
+  assert.equal(first.fingerprint, second.fingerprint);
+});
+
+test("repair learning drops raw keys, paths, errors, source and credentials", () => {
+  const finding = {
+    category: "browser-runtime",
+    rootCauseKey: "C:\\private-client\\src\\secret.js",
+    title: "private failure",
+    fingerprint: "private-fingerprint",
+    evidence: { errorText: "https://client.example/private?token=secret" },
+    verification: { status: "VERIFIED", evidence: { matched: true } },
+  };
+  const extracted = extractRepairLearning({
+    finding,
+    remediationResult: {
+      "C:\\private-client\\src\\secret.js": "source code",
+      "API_KEY_SUPER_SECRET": "credential-value",
+    },
+    outcome: "SUCCESS",
+  });
+  const serialized = JSON.stringify(extracted);
+  assert.equal(serialized.includes("private-client"), false);
+  assert.equal(serialized.includes("API_KEY_SUPER_SECRET"), false);
+  assert.equal(serialized.includes("credential-value"), false);
+  assert.equal(extracted.successfulStrategy.resultShape.keyCount, 2);
+
+  const sanitized = sanitizeRepairLearning({
+    finding,
+    learning: {
+      outcome: "SUCCESS",
+      successfulStrategy: {
+        resultType: "object",
+        resultShape: { keyCount: 7, itemCount: 0 },
+        sourceCode: "do not persist this",
+      },
+      lessons: { password: "hunter2" },
+    },
+  });
+  const safe = JSON.stringify(sanitized);
+  assert.equal(safe.includes("do not persist this"), false);
+  assert.equal(safe.includes("hunter2"), false);
+  assert.equal(sanitized.successfulStrategy.resultShape.keyCount, 7);
 });

@@ -32,11 +32,13 @@ import {
   markReportApproved,
   recordMonitoringFailure,
   recordMonitoringRunFromLease,
+  reconcileDeadLetterMonitoringRuns,
   getActiveLease,
   recordOperationalEvent,
   recordRepairOutcome,
   setMonitoringPolicyEnabled,
 } from "./repository.js";
+import { sanitizeRepairLearning } from "./repair-intelligence.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MONITOR_CAPABILITIES = new Set([
@@ -57,26 +59,83 @@ function authorize(args) {
   }
 }
 
+function normalizeProjectRoot(value, badRequest) {
+  const root = String(value || "").trim();
+  if (!root) throw badRequest("projectRoot is required");
+  if (root.length > 1024) throw badRequest("projectRoot is too long");
+  if (/[\u0000-\u001f\u007f]/.test(root)) {
+    throw badRequest("projectRoot contains invalid control characters");
+  }
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(root)) {
+    throw badRequest("projectRoot must be a local absolute filesystem path");
+  }
+  const windowsAbsolute = /^[a-z]:[\\/]/i.test(root);
+  const posixAbsolute = root.startsWith("/");
+  if (!windowsAbsolute && !posixAbsolute) {
+    throw badRequest("projectRoot must be an absolute filesystem path");
+  }
+  if (root.replace(/\\/g, "/").split("/").includes("..")) {
+    throw badRequest("projectRoot must not contain parent traversal");
+  }
+  return root;
+}
+
+function normalizeMonitorInput(value, badRequest) {
+  if (value == null) return {};
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw badRequest("monitor input must be a JSON object");
+  }
+  if (Buffer.byteLength(JSON.stringify(value)) > 64 * 1024) {
+    throw badRequest("monitor input is too large");
+  }
+  return value;
+}
+
+async function materializeQueuedRemediation(
+  approval,
+  queued,
+  finding = null,
+) {
+  let remediationRequest = queued.remediation_request_id
+    ? {
+        id: queued.remediation_request_id,
+        status: queued.remediation_status,
+        projectRoot: queued.project_root,
+      }
+    : null;
+
+  if (!remediationRequest) {
+    const context = finding || await getFindingContext(approval.findingId);
+    if (!context) {
+      const error = new Error("finding not found");
+      error.statusCode = 404;
+      throw error;
+    }
+    remediationRequest = await createRemediationRequest({
+      targetId: context.targetId,
+      findingId: context.id,
+      jobId: queued.id,
+      projectRoot: approval.payload.projectRoot,
+    });
+  }
+
+  return {
+    job: {
+      id: queued.id,
+      targetId: queued.target_id,
+      capability: queued.capability,
+      state: queued.state,
+      input: queued.input,
+    },
+    remediationRequest,
+    duplicate: true,
+  };
+}
+
 async function queueApprovedRemediation(approval) {
   const alreadyQueued = await findRemediationByApprovalId(approval.id);
   if (alreadyQueued) {
-    return {
-      job: {
-        id: alreadyQueued.id,
-        targetId: alreadyQueued.target_id,
-        capability: alreadyQueued.capability,
-        state: alreadyQueued.state,
-        input: alreadyQueued.input,
-      },
-      remediationRequest: alreadyQueued.remediation_request_id
-        ? {
-            id: alreadyQueued.remediation_request_id,
-            status: alreadyQueued.remediation_status,
-            projectRoot: alreadyQueued.project_root,
-          }
-        : null,
-      duplicate: true,
-    };
+    return materializeQueuedRemediation(approval, alreadyQueued);
   }
 
   const existingFinding = await getFindingContext(approval.findingId);
@@ -93,20 +152,28 @@ async function queueApprovedRemediation(approval) {
     requestedUrl: existingFinding.affectedUrl,
   });
 
-  const job = await createAuthorizedJob({
-    targetId: existingFinding.targetId,
-    authorizationId: authorization.id,
-    jobType: "source-remediation",
-    capability: CAPABILITIES.SOURCE_REMEDIATION,
-    requestedUrl: existingFinding.affectedUrl,
-    input: {
-      findingId: existingFinding.id,
-      projectRoot: approval.payload.projectRoot,
-      approvalId: approval.id,
-    },
-    decision,
-    maxAttempts: 2,
-  });
+  let job;
+  try {
+    job = await createAuthorizedJob({
+      targetId: existingFinding.targetId,
+      authorizationId: authorization.id,
+      jobType: "source-remediation",
+      capability: CAPABILITIES.SOURCE_REMEDIATION,
+      requestedUrl: existingFinding.affectedUrl,
+      input: {
+        findingId: existingFinding.id,
+        projectRoot: approval.payload.projectRoot,
+        approvalId: approval.id,
+      },
+      decision,
+      maxAttempts: 2,
+    });
+  } catch (error) {
+    if (error.code !== "23505") throw error;
+    const raced = await findRemediationByApprovalId(approval.id);
+    if (!raced) throw error;
+    return materializeQueuedRemediation(approval, raced, existingFinding);
+  }
 
   const remediationRequest = await createRemediationRequest({
     targetId: existingFinding.targetId,
@@ -115,7 +182,7 @@ async function queueApprovedRemediation(approval) {
     projectRoot: approval.payload.projectRoot,
   });
 
-  return { job, remediationRequest };
+  return { job, remediationRequest, duplicate: false };
 }
 
 export async function handleMilestoneBRoute({
@@ -204,10 +271,15 @@ export async function handleMilestoneBRoute({
     }
     const finding = await getFindingContext(body.findingId);
     if (!finding) return json(res, 404, { error: "FINDING_NOT_FOUND" });
+    const learning = sanitizeRepairLearning({
+      finding,
+      learning: body.learning,
+    });
+    if (!learning) throw badRequest("repair outcome is invalid");
     const patternKey = await recordRepairOutcome({
       remediationRequestId: body.remediationRequestId,
       finding,
-      learning: body.learning,
+      learning,
     });
     return json(res, 201, { patternKey });
   }
@@ -227,7 +299,7 @@ export async function handleMilestoneBRoute({
   if (req.method === "POST" && match) {
     if (!validId(match[1])) throw badRequest("finding id is invalid");
     const body = await readJson(req);
-    if (!body.projectRoot?.trim()) throw badRequest("projectRoot is required");
+    const projectRoot = normalizeProjectRoot(body.projectRoot, badRequest);
 
     const finding = await getFindingContext(match[1]);
     if (!finding) return json(res, 404, { error: "FINDING_NOT_FOUND" });
@@ -248,7 +320,7 @@ export async function handleMilestoneBRoute({
         findingId: finding.id,
         actionType: "SOURCE_REMEDIATION",
         payload: {
-          projectRoot: body.projectRoot.trim(),
+          projectRoot,
           findingId: finding.id,
         },
         requestedBy: body.requestedBy || "chat",
@@ -293,6 +365,7 @@ export async function handleMilestoneBRoute({
     }
     if (result.status === "ALREADY_DECIDED") {
       if (
+        decision === "APPROVED" &&
         result.approval.status === "APPROVED" &&
         result.approval.actionType === "SOURCE_REMEDIATION"
       ) {
@@ -300,6 +373,21 @@ export async function handleMilestoneBRoute({
         return json(res, 200, {
           approval: result.approval,
           ...queued,
+          idempotentReplay: true,
+        });
+      }
+      if (
+        decision === "APPROVED" &&
+        result.approval.status === "APPROVED" &&
+        result.approval.actionType === "REPORT_RELEASE"
+      ) {
+        const report = await markReportApproved(result.approval.reportId);
+        if (!report) {
+          return json(res, 409, { error: "REPORT_NOT_RELEASABLE" });
+        }
+        return json(res, 200, {
+          approval: result.approval,
+          report,
           idempotentReplay: true,
         });
       }
@@ -323,6 +411,9 @@ export async function handleMilestoneBRoute({
 
     if (result.approval.actionType === "REPORT_RELEASE") {
       const report = await markReportApproved(result.approval.reportId);
+      if (!report) {
+        return json(res, 409, { error: "REPORT_NOT_RELEASABLE" });
+      }
       return json(res, 200, {
         approval: result.approval,
         report,
@@ -336,6 +427,9 @@ export async function handleMilestoneBRoute({
   if (req.method === "POST" && match) {
     const report = await getReport(match[1]);
     if (!report) return json(res, 404, { error: "REPORT_NOT_FOUND" });
+    if (report.status !== "READY") {
+      return json(res, 409, { error: "REPORT_NOT_RELEASABLE" });
+    }
     const body = await readJson(req);
     try {
       const approval = await createApprovalRequest({
@@ -390,7 +484,7 @@ export async function handleMilestoneBRoute({
       name: String(body.name || "continuous monitor").slice(0, 120),
       capability: body.capability,
       requestedUrl,
-      input: body.input || {},
+      input: normalizeMonitorInput(body.input, badRequest),
       cadenceMinutes,
       dailyBudgetUnits,
     });
@@ -399,7 +493,12 @@ export async function handleMilestoneBRoute({
 
   if (req.method === "GET" && match) {
     if (!validId(match[1])) throw badRequest("target id is invalid");
-    return json(res, 200, { policies: await listMonitoringPolicies(match[1]) });
+    return json(res, 200, {
+      policies: await listMonitoringPolicies(
+        match[1],
+        url.searchParams.get("limit") || 100,
+      ),
+    });
   }
 
   match = url.pathname.match(/^\/v1\/monitors\/([0-9a-f-]+)\/(enable|disable)$/i);
@@ -413,6 +512,8 @@ export async function handleMilestoneBRoute({
     const body = await readJson(req);
     await expirePendingApprovals();
     const deadLettered = await sweepExhaustedJobs();
+    const reconciledMonitorFailures =
+      await reconcileDeadLetterMonitoringRuns(body.reconcileLimit || 100);
     const cancelledForAuthorization = await cancelInvalidAuthorizationJobs();
     const due = await claimDueMonitoringPolicies(body.limit || 25);
     const queued = [];
@@ -464,7 +565,10 @@ export async function handleMilestoneBRoute({
           eventType: "MONITOR_QUEUE_FAILED",
           severity: "ERROR",
           targetId: policy.targetId,
-          payload: { policyId: policy.id, error: error.message },
+          payload: {
+            policyId: policy.id,
+            errorCode: String(error.code || "AUTHORIZATION_FAILED").slice(0, 80),
+          },
         });
       }
     }
@@ -473,13 +577,19 @@ export async function handleMilestoneBRoute({
       queued,
       skipped,
       deadLettered,
+      reconciledMonitorFailures,
       cancelledForAuthorization,
     });
   }
 
   match = url.pathname.match(/^\/v1\/targets\/([0-9a-f-]+)\/regressions$/i);
   if (req.method === "GET" && match) {
-    return json(res, 200, { regressions: await listOpenRegressions(match[1]) });
+    return json(res, 200, {
+      regressions: await listOpenRegressions(
+        match[1],
+        url.searchParams.get("limit") || 100,
+      ),
+    });
   }
 
   if (req.method === "GET" && url.pathname === "/v1/repair-patterns") {

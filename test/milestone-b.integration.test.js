@@ -276,6 +276,10 @@ test(
       outcome: "SUCCESS",
     });
 
+    learning.successfulStrategy.rawUrl =
+      "https://private-client.example/internal?token=secret";
+    learning.lessons.sourceCode = "const password = 'do-not-store';";
+
     const learned = await request(
       `/v1/worker/milestone-b/jobs/${approved.body.job.id}/repair-outcome`,
       {
@@ -308,6 +312,9 @@ test(
     assert.ok(patterns.body.patterns.some(
       (pattern) => pattern.patternKey === learned.body.patternKey,
     ));
+    const serializedPatterns = JSON.stringify(patterns.body.patterns);
+    assert.equal(serializedPatterns.includes("private-client.example"), false);
+    assert.equal(serializedPatterns.includes("do-not-store"), false);
 
     const report = await request(`/v1/targets/${target.id}/reports`, {
       method: "POST",
@@ -466,14 +473,17 @@ test(
 
     const open = await request(`/v1/targets/${target.body.id}/regressions`);
     assert.equal(open.status, 200);
-    assert.ok(open.body.regressions.length >= 1);
+    assert.ok(open.body.regressions.length >= 2);
+    const initialFingerprints = new Set(
+      open.body.regressions.map((item) => item.fingerprint),
+    );
 
     await request(`/v1/monitors/${policy.body.id}/enable`, {
       method: "POST",
       body: {},
     });
     const third = await queueAndLease();
-    const recovered = await request(
+    const repeated = await request(
       `/v1/worker/milestone-b/jobs/${third.queued.jobId}/monitoring-run`,
       {
         method: "POST",
@@ -481,7 +491,85 @@ test(
         body: {
           workerId: third.workerId,
           policyId: policy.body.id,
-          costUnits: 0.25,
+          costUnits: 99999,
+          snapshot: {
+            kind: "http",
+            statusCode: 503,
+            latencyMs: 1800,
+            contentType: "text/html",
+            location: null,
+          },
+        },
+      },
+    );
+    assert.equal(repeated.status, 201);
+    assert.equal(repeated.body.state, "REGRESSION");
+    await request(`/v1/worker/jobs/${third.queued.jobId}/complete`, {
+      method: "POST",
+      token: WORKER_TOKEN,
+      body: { workerId: third.workerId, state: "SUCCEEDED", output: {} },
+    });
+
+    const repeatedOpen = await request(
+      `/v1/targets/${target.body.id}/regressions`,
+    );
+    assert.deepEqual(
+      new Set(repeatedOpen.body.regressions.map((item) => item.fingerprint)),
+      initialFingerprints,
+    );
+    const repeatedJob = await request(`/v1/jobs/${third.queued.jobId}`);
+    assert.equal(repeatedJob.body.costUnits, 0.25);
+
+    await request(`/v1/monitors/${policy.body.id}/enable`, {
+      method: "POST",
+      body: {},
+    });
+    const fourth = await queueAndLease();
+    const partial = await request(
+      `/v1/worker/milestone-b/jobs/${fourth.queued.jobId}/monitoring-run`,
+      {
+        method: "POST",
+        token: WORKER_TOKEN,
+        body: {
+          workerId: fourth.workerId,
+          policyId: policy.body.id,
+          snapshot: {
+            kind: "http",
+            statusCode: 200,
+            latencyMs: 1800,
+            contentType: "text/html",
+            location: null,
+          },
+        },
+      },
+    );
+    assert.equal(partial.status, 201);
+    assert.equal(partial.body.state, "REGRESSION");
+    await request(`/v1/worker/jobs/${fourth.queued.jobId}/complete`, {
+      method: "POST",
+      token: WORKER_TOKEN,
+      body: { workerId: fourth.workerId, state: "SUCCEEDED", output: {} },
+    });
+
+    const partiallyResolved = await request(
+      `/v1/targets/${target.body.id}/regressions`,
+    );
+    assert.equal(partiallyResolved.body.regressions.length, 1);
+    assert.equal(partiallyResolved.body.regressions[0].category, "performance");
+
+    await request(`/v1/monitors/${policy.body.id}/enable`, {
+      method: "POST",
+      body: {},
+    });
+    const fifth = await queueAndLease();
+    const recovered = await request(
+      `/v1/worker/milestone-b/jobs/${fifth.queued.jobId}/monitoring-run`,
+      {
+        method: "POST",
+        token: WORKER_TOKEN,
+        body: {
+          workerId: fifth.workerId,
+          policyId: policy.body.id,
           snapshot: {
             kind: "http",
             statusCode: 200,
@@ -494,10 +582,10 @@ test(
     );
     assert.equal(recovered.status, 201);
     assert.equal(recovered.body.state, "HEALTHY");
-    await request(`/v1/worker/jobs/${third.queued.jobId}/complete`, {
+    await request(`/v1/worker/jobs/${fifth.queued.jobId}/complete`, {
       method: "POST",
       token: WORKER_TOKEN,
-      body: { workerId: third.workerId, state: "SUCCEEDED", output: {} },
+      body: { workerId: fifth.workerId, state: "SUCCEEDED", output: {} },
     });
 
     const resolved = await request(
@@ -736,5 +824,835 @@ test(
       cancelled.body.error.code,
       "AUTHORIZATION_NO_LONGER_VALID",
     );
+  },
+);
+
+test(
+  "approval transitions and remediation replay are race-safe",
+  { skip: !enabled },
+  async () => {
+    const { target, finding } = await createVerifiedFinding(
+      "approval-race-b.example.com",
+    );
+
+    for (const projectRoot of [
+      "relative/project",
+      "C:\\authorized\\..\\escape",
+      "https://example.com/project",
+    ]) {
+      const malformed = await request(
+        `/v1/findings/${finding.id}/remediate`,
+        { method: "POST", body: { projectRoot } },
+      );
+      assert.equal(malformed.status, 400);
+    }
+
+    const remediation = await request(
+      `/v1/findings/${finding.id}/remediate`,
+      {
+        method: "POST",
+        body: { projectRoot: "C:\\authorized\\approval-race" },
+      },
+    );
+    assert.equal(remediation.status, 202);
+
+    const duplicateRequest = await request(
+      `/v1/findings/${finding.id}/remediate`,
+      {
+        method: "POST",
+        body: { projectRoot: "C:\\authorized\\approval-race" },
+      },
+    );
+    assert.equal(duplicateRequest.status, 409);
+    assert.equal(duplicateRequest.body.error, "APPROVAL_ALREADY_PENDING");
+
+    const approvals = await Promise.all([
+      request(`/v1/approvals/${remediation.body.approval.id}/approve`, {
+        method: "POST",
+        body: { decidedBy: "human-a" },
+      }),
+      request(`/v1/approvals/${remediation.body.approval.id}/approve`, {
+        method: "POST",
+        body: { decidedBy: "human-b" },
+      }),
+    ]);
+    assert.deepEqual(
+      approvals.map((item) => item.status).sort(),
+      [200, 201],
+    );
+    assert.equal(approvals[0].body.job.id, approvals[1].body.job.id);
+
+    const jobCount = await pool.query(
+      `SELECT COUNT(*)::int AS count
+         FROM jobs
+        WHERE input->>'approvalId' = $1`,
+      [remediation.body.approval.id],
+    );
+    assert.equal(jobCount.rows[0].count, 1);
+    const remediationCount = await pool.query(
+      `SELECT COUNT(*)::int AS count
+         FROM remediation_requests r
+         JOIN jobs j ON j.id = r.job_id
+        WHERE j.input->>'approvalId' = $1`,
+      [remediation.body.approval.id],
+    );
+    assert.equal(remediationCount.rows[0].count, 1);
+
+    const rejectAfterApprove = await request(
+      `/v1/approvals/${remediation.body.approval.id}/reject`,
+      { method: "POST", body: { decidedBy: "human-c" } },
+    );
+    assert.equal(rejectAfterApprove.status, 409);
+
+    const report = await request(`/v1/targets/${target.id}/reports`, {
+      method: "POST",
+      body: {},
+    });
+    const release = await request(
+      `/v1/reports/${report.body.id}/request-release`,
+      { method: "POST", body: { requestedBy: "report-owner" } },
+    );
+    assert.equal(release.status, 202);
+    const duplicateRelease = await request(
+      `/v1/reports/${report.body.id}/request-release`,
+      { method: "POST", body: { requestedBy: "report-owner" } },
+    );
+    assert.equal(duplicateRelease.status, 409);
+
+    const releaseApproved = await request(
+      `/v1/approvals/${release.body.approval.id}/approve`,
+      { method: "POST", body: { decidedBy: "report-reviewer" } },
+    );
+    assert.equal(releaseApproved.status, 200);
+    assert.equal(releaseApproved.body.report.status, "APPROVED");
+    const releaseReplay = await request(
+      `/v1/approvals/${release.body.approval.id}/approve`,
+      { method: "POST", body: { decidedBy: "report-reviewer" } },
+    );
+    assert.equal(releaseReplay.status, 200);
+    assert.equal(releaseReplay.body.idempotentReplay, true);
+
+    const alreadyReleased = await request(
+      `/v1/reports/${report.body.id}/request-release`,
+      { method: "POST", body: { requestedBy: "report-owner" } },
+    );
+    assert.equal(alreadyReleased.status, 409);
+    assert.equal(alreadyReleased.body.error, "REPORT_NOT_RELEASABLE");
+  },
+);
+
+test(
+  "monitor claims are single-flight and failed runs consume budget once",
+  { skip: !enabled },
+  async () => {
+    const host = "monitor-race-b.example.com";
+    const target = await request("/v1/targets", {
+      method: "POST",
+      body: {
+        organizationName: "Monitor Race B",
+        baseUrl: `https://${host}`,
+        authorization: {
+          mode: "PUBLIC_QA_ONLY",
+          allowedHosts: [host],
+        },
+      },
+    });
+    assert.equal(target.status, 201);
+
+    const outOfScope = await request(
+      `/v1/targets/${target.body.id}/monitors`,
+      {
+        method: "POST",
+        body: {
+          name: "Out of scope",
+          capability: CAPABILITIES.PUBLIC_HTTP_OBSERVE,
+          requestedUrl: "https://outside-scope.example.com/",
+          cadenceMinutes: 5,
+          dailyBudgetUnits: 1,
+        },
+      },
+    );
+    assert.equal(outOfScope.status, 403);
+
+    const policy = await request(
+      `/v1/targets/${target.body.id}/monitors`,
+      {
+        method: "POST",
+        body: {
+          name: "Single flight",
+          capability: CAPABILITIES.PUBLIC_HTTP_OBSERVE,
+          requestedUrl: `https://${host}/`,
+          cadenceMinutes: 5,
+          dailyBudgetUnits: 0.25,
+        },
+      },
+    );
+    assert.equal(policy.status, 201);
+
+    const ticks = await Promise.all([
+      request("/v1/monitoring/tick", {
+        method: "POST",
+        body: { limit: 100 },
+      }),
+      request("/v1/monitoring/tick", {
+        method: "POST",
+        body: { limit: 100 },
+      }),
+    ]);
+    const queued = ticks.flatMap((item) => item.body.queued)
+      .filter((item) => item.policyId === policy.body.id);
+    assert.equal(queued.length, 1);
+
+    await pool.query(
+      "UPDATE monitoring_policies SET next_run_at = now() - interval '1 second' WHERE id = $1",
+      [policy.body.id],
+    );
+    const whileActive = await request("/v1/monitoring/tick", {
+      method: "POST",
+      body: { limit: 100 },
+    });
+    assert.equal(
+      whileActive.body.queued.some((item) => item.policyId === policy.body.id),
+      false,
+    );
+
+    await pool.query(
+      `UPDATE jobs
+          SET max_attempts = 1, created_at = '1996-01-01T00:00:00Z'
+        WHERE id = $1`,
+      [queued[0].jobId],
+    );
+    const workerId = "failed-monitor-worker";
+    const lease = await request("/v1/worker/jobs/lease", {
+      method: "POST",
+      token: WORKER_TOKEN,
+      body: {
+        workerId,
+        capabilities: [CAPABILITIES.PUBLIC_HTTP_OBSERVE],
+        leaseSeconds: 60,
+      },
+    });
+    assert.equal(lease.status, 200);
+    assert.equal(lease.body.id, queued[0].jobId);
+
+    const failed = await request(
+      `/v1/worker/milestone-b/jobs/${queued[0].jobId}/monitoring-failure`,
+      {
+        method: "POST",
+        token: WORKER_TOKEN,
+        body: {
+          workerId,
+          policyId: policy.body.id,
+          error: {
+            code: "TIMEOUT",
+            message: "https://private.example/?token=DO_NOT_STORE",
+          },
+        },
+      },
+    );
+    assert.equal(failed.status, 201);
+    assert.equal(failed.body.state, "FAILED");
+    assert.equal(failed.body.duplicate, false);
+
+    const duplicateFailure = await request(
+      `/v1/worker/milestone-b/jobs/${queued[0].jobId}/monitoring-failure`,
+      {
+        method: "POST",
+        token: WORKER_TOKEN,
+        body: {
+          workerId,
+          policyId: policy.body.id,
+          error: { code: "TIMEOUT", message: "another private value" },
+        },
+      },
+    );
+    assert.equal(duplicateFailure.status, 201);
+    assert.equal(duplicateFailure.body.duplicate, true);
+
+    const dead = await request(
+      `/v1/worker/jobs/${queued[0].jobId}/complete`,
+      {
+        method: "POST",
+        token: WORKER_TOKEN,
+        body: {
+          workerId,
+          state: "FAILED",
+          error: { code: "TIMEOUT" },
+        },
+      },
+    );
+    assert.equal(dead.status, 200);
+    assert.equal(dead.body.state, "DEAD_LETTER");
+
+    const runRows = await pool.query(
+      "SELECT state, cost_units, snapshot FROM monitoring_runs WHERE job_id = $1",
+      [queued[0].jobId],
+    );
+    assert.equal(runRows.rowCount, 1);
+    assert.equal(runRows.rows[0].state, "FAILED");
+    assert.equal(Number(runRows.rows[0].cost_units), 0.25);
+    assert.deepEqual(runRows.rows[0].snapshot, {
+      kind: "failure",
+      code: "TIMEOUT",
+    });
+
+    const eventRows = await pool.query(
+      "SELECT payload FROM operational_events WHERE job_id = $1",
+      [queued[0].jobId],
+    );
+    assert.equal(
+      JSON.stringify(eventRows.rows).includes("DO_NOT_STORE"),
+      false,
+    );
+
+    await pool.query(
+      "UPDATE monitoring_policies SET next_run_at = now() - interval '1 second' WHERE id = $1",
+      [policy.body.id],
+    );
+    const exhausted = await request("/v1/monitoring/tick", {
+      method: "POST",
+      body: { limit: 100 },
+    });
+    assert.ok(exhausted.body.skipped.some(
+      (item) =>
+        item.policyId === policy.body.id &&
+        item.reason === "DAILY_BUDGET_EXCEEDED",
+    ));
+
+    await request(`/v1/monitors/${policy.body.id}/disable`, {
+      method: "POST",
+      body: {},
+    });
+    await pool.query(
+      "UPDATE monitoring_policies SET next_run_at = now() - interval '1 second' WHERE id = $1",
+      [policy.body.id],
+    );
+    const disabled = await request("/v1/monitoring/tick", {
+      method: "POST",
+      body: { limit: 100 },
+    });
+    assert.equal(
+      disabled.body.queued.some((item) => item.policyId === policy.body.id),
+      false,
+    );
+  },
+);
+
+test(
+  "queue leases fail closed across crashes, delayed retries, and revocation",
+  { skip: !enabled },
+  async () => {
+    const host = "queue-hardening-b.example.com";
+    const target = await request("/v1/targets", {
+      method: "POST",
+      body: {
+        organizationName: "Queue Hardening B",
+        baseUrl: `https://${host}`,
+        authorization: {
+          mode: "PUBLIC_QA_ONLY",
+          allowedHosts: [host],
+        },
+      },
+    });
+    assert.equal(target.status, 201);
+
+    const crashed = await request("/v1/jobs", {
+      method: "POST",
+      body: {
+        targetId: target.body.id,
+        jobType: "crash-recovery",
+        capability: CAPABILITIES.PUBLIC_HTTP_OBSERVE,
+        requestedUrl: `https://${host}/crash`,
+        maxAttempts: 2,
+        input: {},
+      },
+    });
+    assert.equal(crashed.status, 201);
+    await pool.query(
+      "UPDATE jobs SET created_at = '1995-01-01T00:00:00Z' WHERE id = $1",
+      [crashed.body.id],
+    );
+
+    const firstLease = await request("/v1/worker/jobs/lease", {
+      method: "POST",
+      token: WORKER_TOKEN,
+      body: {
+        workerId: "crash-worker-1",
+        capabilities: [CAPABILITIES.PUBLIC_HTTP_OBSERVE],
+        leaseSeconds: 30,
+      },
+    });
+    assert.equal(firstLease.status, 200);
+    assert.equal(firstLease.body.id, crashed.body.id);
+
+    const wrongHeartbeat = await request(
+      `/v1/worker/jobs/${crashed.body.id}/heartbeat`,
+      {
+        method: "POST",
+        token: WORKER_TOKEN,
+        body: { workerId: "wrong-worker", leaseSeconds: 60 },
+      },
+    );
+    assert.equal(wrongHeartbeat.status, 409);
+
+    await pool.query(
+      "UPDATE jobs SET lease_expires_at = now() - interval '1 second' WHERE id = $1",
+      [crashed.body.id],
+    );
+    const recoveredLease = await request("/v1/worker/jobs/lease", {
+      method: "POST",
+      token: WORKER_TOKEN,
+      body: {
+        workerId: "crash-worker-2",
+        capabilities: [CAPABILITIES.PUBLIC_HTTP_OBSERVE],
+        leaseSeconds: 60,
+      },
+    });
+    assert.equal(recoveredLease.status, 200);
+    assert.equal(recoveredLease.body.id, crashed.body.id);
+    assert.equal(recoveredLease.body.attemptCount, 2);
+
+    const staleHeartbeat = await request(
+      `/v1/worker/jobs/${crashed.body.id}/heartbeat`,
+      {
+        method: "POST",
+        token: WORKER_TOKEN,
+        body: { workerId: "crash-worker-1", leaseSeconds: 60 },
+      },
+    );
+    assert.equal(staleHeartbeat.status, 409);
+
+    const dead = await request(
+      `/v1/worker/jobs/${crashed.body.id}/complete`,
+      {
+        method: "POST",
+        token: WORKER_TOKEN,
+        body: {
+          workerId: "crash-worker-2",
+          state: "FAILED",
+          error: { code: "WORKER_CRASHED_TWICE" },
+        },
+      },
+    );
+    assert.equal(dead.status, 200);
+    assert.equal(dead.body.state, "DEAD_LETTER");
+
+    const duplicateCompletion = await request(
+      `/v1/worker/jobs/${crashed.body.id}/complete`,
+      {
+        method: "POST",
+        token: WORKER_TOKEN,
+        body: {
+          workerId: "crash-worker-2",
+          state: "FAILED",
+          error: { code: "DUPLICATE" },
+        },
+      },
+    );
+    assert.equal(duplicateCompletion.status, 409);
+
+    const delayed = await request("/v1/jobs", {
+      method: "POST",
+      body: {
+        targetId: target.body.id,
+        jobType: "delayed-retry",
+        capability: CAPABILITIES.PUBLIC_HTTP_OBSERVE,
+        requestedUrl: `https://${host}/retry`,
+        maxAttempts: 2,
+        input: {},
+      },
+    });
+    await pool.query(
+      "UPDATE jobs SET created_at = '1995-01-02T00:00:00Z' WHERE id = $1",
+      [delayed.body.id],
+    );
+    const delayedFirst = await request("/v1/worker/jobs/lease", {
+      method: "POST",
+      token: WORKER_TOKEN,
+      body: {
+        workerId: "delay-worker-1",
+        capabilities: [CAPABILITIES.PUBLIC_HTTP_OBSERVE],
+        leaseSeconds: 60,
+      },
+    });
+    assert.equal(delayedFirst.body.id, delayed.body.id);
+
+    const retryScheduled = await request(
+      `/v1/worker/jobs/${delayed.body.id}/complete`,
+      {
+        method: "POST",
+        token: WORKER_TOKEN,
+        body: {
+          workerId: "delay-worker-1",
+          state: "FAILED",
+          error: { code: "TRANSIENT" },
+        },
+      },
+    );
+    assert.equal(retryScheduled.body.state, "QUEUED");
+    assert.ok(retryScheduled.body.nextAttemptAt);
+
+    const tooEarly = await request("/v1/worker/jobs/lease", {
+      method: "POST",
+      token: WORKER_TOKEN,
+      body: {
+        workerId: "delay-worker-early",
+        capabilities: [CAPABILITIES.PUBLIC_HTTP_OBSERVE],
+        leaseSeconds: 60,
+      },
+    });
+    assert.equal(tooEarly.status, 204);
+
+    await pool.query(
+      "UPDATE jobs SET next_attempt_at = now() - interval '1 second' WHERE id = $1",
+      [delayed.body.id],
+    );
+    const delayedSecond = await request("/v1/worker/jobs/lease", {
+      method: "POST",
+      token: WORKER_TOKEN,
+      body: {
+        workerId: "delay-worker-2",
+        capabilities: [CAPABILITIES.PUBLIC_HTTP_OBSERVE],
+        leaseSeconds: 60,
+      },
+    });
+    assert.equal(delayedSecond.status, 200);
+    assert.equal(delayedSecond.body.id, delayed.body.id);
+
+    await pool.query(
+      "UPDATE authorizations SET revoked_at = now() WHERE target_id = $1 AND revoked_at IS NULL",
+      [target.body.id],
+    );
+    const revokedHeartbeat = await request(
+      `/v1/worker/jobs/${delayed.body.id}/heartbeat`,
+      {
+        method: "POST",
+        token: WORKER_TOKEN,
+        body: { workerId: "delay-worker-2", leaseSeconds: 60 },
+      },
+    );
+    assert.equal(revokedHeartbeat.status, 409);
+
+    const maintenance = await request("/v1/monitoring/tick", {
+      method: "POST",
+      body: { limit: 10 },
+    });
+    assert.ok(maintenance.body.cancelledForAuthorization >= 1);
+    const cancelled = await request(`/v1/jobs/${delayed.body.id}`);
+    assert.equal(cancelled.body.state, "CANCELLED");
+    assert.equal(cancelled.body.leaseOwner, null);
+
+    const completionAfterCancel = await request(
+      `/v1/worker/jobs/${delayed.body.id}/complete`,
+      {
+        method: "POST",
+        token: WORKER_TOKEN,
+        body: {
+          workerId: "delay-worker-2",
+          state: "SUCCEEDED",
+          output: {},
+        },
+      },
+    );
+    assert.equal(completionAfterCancel.status, 409);
+  },
+);
+
+test(
+  "revocation between remediation request and approval prevents execution",
+  { skip: !enabled },
+  async () => {
+    const { target, finding } = await createVerifiedFinding(
+      "approval-revoked-b.example.com",
+    );
+    const remediation = await request(
+      `/v1/findings/${finding.id}/remediate`,
+      {
+        method: "POST",
+        body: { projectRoot: "C:\\authorized\\revoked-before-approval" },
+      },
+    );
+    assert.equal(remediation.status, 202);
+
+    await pool.query(
+      "UPDATE authorizations SET revoked_at = now() WHERE target_id = $1 AND revoked_at IS NULL",
+      [target.id],
+    );
+    const approval = await request(
+      `/v1/approvals/${remediation.body.approval.id}/approve`,
+      {
+        method: "POST",
+        body: { decidedBy: "authorized-human" },
+      },
+    );
+    assert.equal(approval.status, 403);
+
+    const queued = await pool.query(
+      "SELECT COUNT(*)::int AS count FROM jobs WHERE input->>'approvalId' = $1",
+      [remediation.body.approval.id],
+    );
+    assert.equal(queued.rows[0].count, 0);
+  },
+);
+
+test(
+  "rejected report approval cannot later be approved",
+  { skip: !enabled },
+  async () => {
+    const host = "report-reject-b.example.com";
+    const target = await request("/v1/targets", {
+      method: "POST",
+      body: {
+        organizationName: "Report Reject B",
+        baseUrl: `https://${host}`,
+        authorization: {
+          mode: "PUBLIC_QA_ONLY",
+          allowedHosts: [host],
+        },
+      },
+    });
+    const report = await request(`/v1/targets/${target.body.id}/reports`, {
+      method: "POST",
+      body: {},
+    });
+    const release = await request(
+      `/v1/reports/${report.body.id}/request-release`,
+      { method: "POST", body: { requestedBy: "owner" } },
+    );
+    const rejected = await request(
+      `/v1/approvals/${release.body.approval.id}/reject`,
+      { method: "POST", body: { decidedBy: "reviewer" } },
+    );
+    assert.equal(rejected.status, 200);
+    assert.equal(rejected.body.approval.status, "REJECTED");
+
+    const approveAfterReject = await request(
+      `/v1/approvals/${release.body.approval.id}/approve`,
+      { method: "POST", body: { decidedBy: "other-reviewer" } },
+    );
+    assert.equal(approveAfterReject.status, 409);
+    const reportAfter = await request(`/v1/reports/${report.body.id}`);
+    assert.equal(reportAfter.body.status, "READY");
+  },
+);
+
+test(
+  "dead-lettered monitor crashes are reconciled and do not poison baseline creation",
+  { skip: !enabled },
+  async () => {
+    const host = "monitor-crash-b.example.com";
+    const target = await request("/v1/targets", {
+      method: "POST",
+      body: {
+        organizationName: "Monitor Crash B",
+        baseUrl: `https://${host}`,
+        authorization: {
+          mode: "PUBLIC_QA_ONLY",
+          allowedHosts: [host],
+        },
+      },
+    });
+    const policy = await request(
+      `/v1/targets/${target.body.id}/monitors`,
+      {
+        method: "POST",
+        body: {
+          name: "Crash accounting",
+          capability: CAPABILITIES.PUBLIC_HTTP_OBSERVE,
+          requestedUrl: `https://${host}/`,
+          cadenceMinutes: 5,
+          dailyBudgetUnits: 2,
+        },
+      },
+    );
+    assert.equal(policy.status, 201);
+
+    const tick = await request("/v1/monitoring/tick", {
+      method: "POST",
+      body: { limit: 100 },
+    });
+    const queued = tick.body.queued.find(
+      (item) => item.policyId === policy.body.id,
+    );
+    assert.ok(queued);
+    await pool.query(
+      `UPDATE jobs
+          SET max_attempts = 1, created_at = '1994-01-01T00:00:00Z'
+        WHERE id = $1`,
+      [queued.jobId],
+    );
+
+    const workerId = "crashed-monitor";
+    const lease = await request("/v1/worker/jobs/lease", {
+      method: "POST",
+      token: WORKER_TOKEN,
+      body: {
+        workerId,
+        capabilities: [CAPABILITIES.PUBLIC_HTTP_OBSERVE],
+        leaseSeconds: 30,
+      },
+    });
+    assert.equal(lease.status, 200);
+    assert.equal(lease.body.id, queued.jobId);
+    await pool.query(
+      "UPDATE jobs SET lease_expires_at = now() - interval '1 second' WHERE id = $1",
+      [queued.jobId],
+    );
+
+    const maintenance = await request("/v1/monitoring/tick", {
+      method: "POST",
+      body: { limit: 100 },
+    });
+    assert.ok(maintenance.body.deadLettered >= 1);
+    assert.ok(maintenance.body.reconciledMonitorFailures >= 1);
+    const failedRun = await pool.query(
+      "SELECT state, snapshot, cost_units FROM monitoring_runs WHERE job_id = $1",
+      [queued.jobId],
+    );
+    assert.equal(failedRun.rowCount, 1);
+    assert.equal(failedRun.rows[0].state, "FAILED");
+    assert.equal(
+      failedRun.rows[0].snapshot.code,
+      "WORKER_RETRY_EXHAUSTED",
+    );
+
+    await request(`/v1/monitors/${policy.body.id}/enable`, {
+      method: "POST",
+      body: {},
+    });
+    const secondTick = await request("/v1/monitoring/tick", {
+      method: "POST",
+      body: { limit: 100 },
+    });
+    const second = secondTick.body.queued.find(
+      (item) => item.policyId === policy.body.id,
+    );
+    assert.ok(second);
+    await pool.query(
+      "UPDATE jobs SET created_at = '1994-01-02T00:00:00Z' WHERE id = $1",
+      [second.jobId],
+    );
+    const secondWorker = "monitor-after-crash";
+    const secondLease = await request("/v1/worker/jobs/lease", {
+      method: "POST",
+      token: WORKER_TOKEN,
+      body: {
+        workerId: secondWorker,
+        capabilities: [CAPABILITIES.PUBLIC_HTTP_OBSERVE],
+        leaseSeconds: 60,
+      },
+    });
+    assert.equal(secondLease.body.id, second.jobId);
+
+    const baseline = await request(
+      `/v1/worker/milestone-b/jobs/${second.jobId}/monitoring-run`,
+      {
+        method: "POST",
+        token: WORKER_TOKEN,
+        body: {
+          workerId: secondWorker,
+          policyId: policy.body.id,
+          snapshot: {
+            kind: "http",
+            statusCode: 200,
+            latencyMs: 100,
+            contentType: "text/html",
+            location: null,
+          },
+        },
+      },
+    );
+    assert.equal(baseline.status, 201);
+    assert.equal(baseline.body.state, "BASELINE");
+    await request(`/v1/worker/jobs/${second.jobId}/complete`, {
+      method: "POST",
+      token: WORKER_TOKEN,
+      body: {
+        workerId: secondWorker,
+        state: "SUCCEEDED",
+        output: {},
+      },
+    });
+  },
+);
+
+test(
+  "monitor validation bounds budgets and input size",
+  { skip: !enabled },
+  async () => {
+    const host = "monitor-validation-b.example.com";
+    const target = await request("/v1/targets", {
+      method: "POST",
+      body: {
+        organizationName: "Monitor Validation B",
+        baseUrl: `https://${host}`,
+        authorization: { mode: "PUBLIC_QA_ONLY", allowedHosts: [host] },
+      },
+    });
+    for (const dailyBudgetUnits of [0, -1, 100001]) {
+      const invalid = await request(
+        `/v1/targets/${target.body.id}/monitors`,
+        {
+          method: "POST",
+          body: {
+            capability: CAPABILITIES.PUBLIC_HTTP_OBSERVE,
+            requestedUrl: `https://${host}/`,
+            cadenceMinutes: 5,
+            dailyBudgetUnits,
+          },
+        },
+      );
+      assert.equal(invalid.status, 400);
+    }
+    const invalidInput = await request(
+      `/v1/targets/${target.body.id}/monitors`,
+      {
+        method: "POST",
+        body: {
+          capability: CAPABILITIES.PUBLIC_HTTP_OBSERVE,
+          requestedUrl: `https://${host}/`,
+          cadenceMinutes: 5,
+          dailyBudgetUnits: 1,
+          input: "not-an-object",
+        },
+      },
+    );
+    assert.equal(invalidInput.status, 400);
+
+    const oversizedInput = await request(
+      `/v1/targets/${target.body.id}/monitors`,
+      {
+        method: "POST",
+        body: {
+          capability: CAPABILITIES.PUBLIC_HTTP_OBSERVE,
+          requestedUrl: `https://${host}/`,
+          cadenceMinutes: 5,
+          dailyBudgetUnits: 1,
+          input: { payload: "x".repeat(70 * 1024) },
+        },
+      },
+    );
+    assert.equal(oversizedInput.status, 400);
+  },
+);
+
+test(
+  "operational metrics use an exact rolling 24-hour error boundary",
+  { skip: !enabled },
+  async () => {
+    const before = await request("/v1/ops/metrics");
+    assert.equal(before.status, 200);
+    await pool.query(
+      `INSERT INTO operational_events
+         (component, event_type, severity, payload, created_at)
+       VALUES
+         ('test','OLD_ERROR','ERROR','{}'::jsonb, now() - interval '25 hours'),
+         ('test','RECENT_ERROR','ERROR','{}'::jsonb, now() - interval '23 hours')`,
+    );
+    const after = await request("/v1/ops/metrics");
+    assert.equal(after.status, 200);
+    assert.equal(after.body.errors24h, before.body.errors24h + 1);
+    assert.ok(after.body.usageToday.costUnits >= 0);
+    assert.ok(after.body.usageToday.jobCount >= 0);
   },
 );

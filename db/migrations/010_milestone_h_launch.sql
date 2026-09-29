@@ -104,3 +104,10 @@ UPDATE platform_users
    AND NOT EXISTS (
      SELECT 1 FROM platform_users WHERE is_platform_operator = true
    );
+
+CREATE TABLE IF NOT EXISTS platform_public_rate_buckets (
+  key_hash text NOT NULL,
+  bucket_start timestamptz NOT NULL,
+  request_count integer NOT NULL DEFAULT 0 CHECK (request_count >= 0),
+  PRIMARY KEY (key_hash, bucket_start)
+);

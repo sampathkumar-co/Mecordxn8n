@@ -71,8 +71,8 @@ function artifactCards(artifacts) {
         ${detail("Bytes", artifact.byte_length ?? "—")}
         ${detail("Captured", fmtDate(artifact.created_at))}
       </div>
-      ${artifact.metadata && Object.keys(artifact.metadata).length ? `<details style="margin-top:10px"><summary>Artifact metadata</summary><pre class="code-block">${escapeHtml(safeJson(artifact.metadata))}</pre></details>` : ""}
-      <p class="muted" style="margin:10px 0 0">Artifact filesystem paths are intentionally not exposed as public browser URLs.</p>
+      ${artifact.metadata && Object.keys(artifact.metadata).length ? `<details class="mt-10"><summary>Artifact metadata</summary><pre class="code-block">${escapeHtml(safeJson(artifact.metadata))}</pre></details>` : ""}
+      <p class="muted my-10">Artifact filesystem paths are intentionally not exposed as public browser URLs.</p>
     </div>
   </section>`).join("");
 }
@@ -146,9 +146,9 @@ export async function renderFindingDetail({ content, signal, route }) {
             ${detail("Authorization", current.mode || "NONE")}
             ${detail("Approval", remediationApproval?.status || "NOT REQUESTED")}
           </div>
-          ${finding.rationale ? `<div class="risk-summary" style="margin-top:10px"><strong>Why it matters</strong><div>${escapeHtml(finding.rationale)}</div></div>` : ""}
-          <button id="request-repair" class="button primary full" style="margin-top:10px" type="button" ${repairEligible ? "" : `disabled aria-disabled="true" title="${escapeHtml(repairReason)}"`}>${remediationApproval ? "View repair state" : "Request repair"}</button>
-          ${repairReason ? `<p class="muted" style="margin:7px 0 0">${escapeHtml(repairReason)}</p>` : ""}
+          ${finding.rationale ? `<div class="risk-summary mt-10"><strong>Why it matters</strong><div>${escapeHtml(finding.rationale)}</div></div>` : ""}
+          <button id="request-repair" class="button primary full mt-10" type="button" ${repairEligible ? "" : `disabled aria-disabled="true" title="${escapeHtml(repairReason)}"`}>${remediationApproval ? "View repair state" : "Request repair"}</button>
+          ${repairReason ? `<p class="muted my-7">${escapeHtml(repairReason)}</p>` : ""}
         </div>`)}
         ${panel("Repair trail", relatedJobs.length ? `<div class="panel-body timeline">${relatedJobs.slice(0,8).map((job) => `<div class="timeline-item"><strong>${escapeHtml(job.state)}</strong><p>${escapeHtml(job.job_type)} · ${escapeHtml(fmtDate(job.created_at))}</p></div>`).join("")}</div>` : '<div class="empty"><strong>No remediation run</strong>Proof exists independently of repair execution.</div>')}
       </aside>

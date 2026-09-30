@@ -19,6 +19,9 @@ COPY db ./db
 COPY scripts ./scripts
 COPY web ./web
 
+RUN chown -R node:node /app
+USER node
+
 ENV NODE_ENV=production
 EXPOSE 8080
 

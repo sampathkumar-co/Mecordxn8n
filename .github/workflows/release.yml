@@ -1,0 +1,106 @@
+name: Release Gate
+
+on:
+  push:
+    branches:
+      - "build/**"
+      - main
+  pull_request:
+    branches:
+      - "build/foundation-v1"
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: mecordxn8n_release
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d mecordxn8n_release"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/mecordxn8n_release
+      RESTORE_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/mecordxn8n_restore
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      PLATFORM_MASTER_KEY: release-gate-master-key-must-be-at-least-32-characters
+      BOOTSTRAP_TOKEN: release-gate-bootstrap-token-with-32-characters
+      POSTGRES_DB: mecordxn8n_release
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: release-gate-postgres-password-with-32-characters
+      ORCHESTRATOR_TOKEN: release-gate-orchestrator-token-with-32-characters
+      WORKER_TOKEN: release-gate-worker-token-with-at-least-32-characters
+      WORKER_TRIGGER_TOKEN: release-gate-trigger-token-with-at-least-32-characters
+      N8N_ENCRYPTION_KEY: release-gate-n8n-key-with-at-least-32-characters
+      APP_DOMAIN: app.example.test
+      ACME_EMAIL: ops@example.test
+      PUBLIC_APP_URL: https://app.example.test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run migrate
+      - run: npm run check
+      - name: Synthetic benchmark
+        run: node scripts/benchmark.mjs
+      - name: Secret scan
+        run: node scripts/secret-scan.mjs
+      - name: Install PostgreSQL 17 client
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-17
+          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+          /usr/lib/postgresql/17/bin/pg_dump --version
+          /usr/lib/postgresql/17/bin/pg_restore --version
+      - name: Backup database
+        run: node scripts/backup-database.mjs artifacts/database.backup
+      - name: Create clean restore database
+        env:
+          PGPASSWORD: postgres
+        run: createdb -h 127.0.0.1 -U postgres mecordxn8n_restore
+      - name: Restore verification
+        run: node scripts/restore-verify.mjs artifacts/database.backup
+      - name: Production preflight
+        run: node scripts/production-preflight.mjs
+      - name: Release certification
+        run: node scripts/release-certify.mjs
+      - name: Validate Caddy ingress
+        run: |
+          docker run --rm \
+            -e APP_DOMAIN=app.example.test \
+            -e ACME_EMAIL=ops@example.test \
+            -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            caddy:2.10-alpine \
+            caddy validate --config /etc/caddy/Caddyfile
+      - name: Validate Docker Compose
+        run: |
+          docker compose --env-file .env.example config >/dev/null
+          docker compose --env-file .env.example -f docker-compose.yml -f docker-compose.production.yml config >/dev/null
+      - name: Build production images
+        run: |
+          docker build -t mecordxn8n-control:release .
+          docker build -f Dockerfile.browser -t mecordxn8n-browser:release .
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: release-certification
+          path: |
+            artifacts/release-certification.json
+            artifacts/database.backup.json

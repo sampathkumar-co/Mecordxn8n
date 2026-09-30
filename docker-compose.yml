@@ -1,0 +1,191 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  control-api:
+    build: .
+    restart: unless-stopped
+    environment:
+      PORT: 8080
+      DATABASE_URL: ${DATABASE_URL}
+      DB_POOL_MAX: ${DB_POOL_MAX:-10}
+      ORCHESTRATOR_TOKEN: ${ORCHESTRATOR_TOKEN}
+      WORKER_TOKEN: ${WORKER_TOKEN}
+      BOOTSTRAP_TOKEN: ${BOOTSTRAP_TOKEN}
+      PLATFORM_MASTER_KEY: ${PLATFORM_MASTER_KEY}
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_PRICE_TEAM: ${STRIPE_PRICE_TEAM:-}
+      STRIPE_PRICE_BUSINESS: ${STRIPE_PRICE_BUSINESS:-}
+      STRIPE_PRICE_ENTERPRISE: ${STRIPE_PRICE_ENTERPRISE:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: sh -c "node scripts/migrate.mjs && node src/server.js"
+    ports:
+      - "127.0.0.1:8080:8080"
+
+  http-observer:
+    build: .
+    restart: unless-stopped
+    environment: &worker-env
+      MECORDXN8N_CONTROL_API_URL: http://control-api:8080
+      WORKER_TOKEN: ${WORKER_TOKEN}
+      WORKER_TRIGGER_TOKEN: ${WORKER_TRIGGER_TOKEN}
+    depends_on:
+      control-api:
+        condition: service_started
+    command: node src/workers/http-observer-service.js
+
+  browser-qa:
+    build: &browser-build
+      context: .
+      dockerfile: Dockerfile.browser
+    restart: unless-stopped
+    user: pwuser
+    shm_size: "1gb"
+    environment:
+      <<: *worker-env
+      WORKER_ID: browser-qa-worker
+      WORKER_PORT: 8091
+      ARTIFACT_DIR: /artifacts
+    depends_on:
+      control-api:
+        condition: service_started
+    command: node src/workers/browser-qa-service.js
+    volumes:
+      - artifacts_data:/artifacts
+
+  site-discovery:
+    build: *browser-build
+    restart: unless-stopped
+    user: pwuser
+    shm_size: "1gb"
+    environment:
+      <<: *worker-env
+      WORKER_ID: site-discovery-worker
+      WORKER_PORT: 8092
+      ARTIFACT_DIR: /artifacts
+    depends_on:
+      control-api:
+        condition: service_started
+    command: node src/workers/site-discovery-service.js
+    volumes:
+      - artifacts_data:/artifacts
+
+  journey-qa:
+    build: *browser-build
+    restart: unless-stopped
+    user: pwuser
+    shm_size: "1gb"
+    environment:
+      <<: *worker-env
+      WORKER_ID: journey-qa-worker
+      WORKER_PORT: 8093
+      ARTIFACT_DIR: /artifacts
+    depends_on:
+      control-api:
+        condition: service_started
+    command: node src/workers/journey-qa-service.js
+    volumes:
+      - artifacts_data:/artifacts
+
+  finding-verification:
+    build: *browser-build
+    restart: unless-stopped
+    user: pwuser
+    shm_size: "1gb"
+    environment:
+      <<: *worker-env
+      WORKER_ID: finding-verification-worker
+      WORKER_PORT: 8094
+      ARTIFACT_DIR: /artifacts
+    depends_on:
+      control-api:
+        condition: service_started
+    command: node src/workers/finding-verification-service.js
+    volumes:
+      - artifacts_data:/artifacts
+
+  remediation:
+    build: .
+    restart: unless-stopped
+    environment:
+      <<: *worker-env
+      WORKER_ID: mecord-remediation-worker
+      WORKER_PORT: 8095
+      MECORD_MCP_URL: ${MECORD_MCP_URL:-}
+      MECORD_MCP_TOKEN: ${MECORD_MCP_TOKEN:-}
+      MECORD_MCP_REMEDIATION_TOOL: ${MECORD_MCP_REMEDIATION_TOOL:-operations}
+    depends_on:
+      control-api:
+        condition: service_started
+    command: node src/workers/remediation-service.js
+
+  integration-delivery:
+    build: .
+    restart: unless-stopped
+    environment:
+      <<: *worker-env
+      WORKER_ID: integration-delivery-worker
+      WORKER_PORT: 8096
+    depends_on:
+      control-api:
+        condition: service_started
+    command: node src/workers/integration-service.js
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:2.40.7
+    restart: unless-stopped
+    environment:
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: ${POSTGRES_DB}
+      DB_POSTGRESDB_USER: ${POSTGRES_USER}
+      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD}
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY}
+      N8N_HOST: ${N8N_HOST:-localhost}
+      N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
+      N8N_PORT: ${N8N_PORT:-5678}
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_PERSONALIZATION_ENABLED: "false"
+      N8N_RUNNERS_ENABLED: "true"
+      MECORDXN8N_CONTROL_API_URL: http://control-api:8080
+      MECORDXN8N_ORCHESTRATOR_TOKEN: ${ORCHESTRATOR_TOKEN}
+      MECORDXN8N_HTTP_OBSERVER_URL: http://http-observer:8090
+      MECORDXN8N_BROWSER_QA_URL: http://browser-qa:8091
+      MECORDXN8N_SITE_DISCOVERY_URL: http://site-discovery:8092
+      MECORDXN8N_JOURNEY_QA_URL: http://journey-qa:8093
+      MECORDXN8N_VERIFICATION_URL: http://finding-verification:8094
+      MECORDXN8N_REMEDIATION_URL: http://remediation:8095
+      MECORDXN8N_INTEGRATION_URL: http://integration-delivery:8096
+      MECORDXN8N_WORKER_TRIGGER_TOKEN: ${WORKER_TRIGGER_TOKEN}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      control-api:
+        condition: service_started
+    ports:
+      - "127.0.0.1:5678:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - artifacts_data:/artifacts:ro
+
+volumes:
+  postgres_data:
+  n8n_data:
+  artifacts_data:

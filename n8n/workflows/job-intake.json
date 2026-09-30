@@ -1,0 +1,67 @@
+{
+  "name": "Mecordxn8n - Authorized Job Intake",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "fd501d4a-25d4-44a8-b0cf-b2b801890b55",
+      "name": "Called by Parent Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.MECORDXN8N_CONTROL_API_URL + '/v1/jobs' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.MECORDXN8N_ORCHESTRATOR_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "2790b6f0-8485-4fc4-88a8-949792448ce0",
+      "name": "Authorize and Queue",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        260,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Called by Parent Workflow": {
+      "main": [
+        [
+          {
+            "node": "Authorize and Queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "versionId": "f2f1638f-fd51-4443-91d9-acde68ea9fd5",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}

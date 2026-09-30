@@ -1,0 +1,28 @@
+{
+  "name": "mecordxn8n",
+  "version": "1.0.0-rc.4",
+  "private": true,
+  "type": "module",
+  "description": "Authorization-gated n8n orchestration for verified website QA and Mecord remediation.",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "migrate": "node scripts/migrate.mjs",
+    "test": "node --test --test-concurrency=1",
+    "validate:json": "node scripts/validate-json.mjs",
+    "check": "node --check src/authorization.js && node --check src/repository.js && node --check src/server.js && node --check src/milestone-a/intelligence.js && node --check src/milestone-a/report.js && node --check src/milestone-a/repository.js && node --check src/milestone-a/routes.js && node --check src/mcp/mecord-client.js && node --check src/workers/control-client.js && node --check src/workers/trigger-service.js && node --check src/workers/public-http.js && node --check src/workers/safe-egress-proxy.js && node --check src/workers/http-observer-service.js && node --check src/workers/browser-qa.js && node --check src/workers/browser-qa-service.js && node --check src/workers/site-discovery.js && node --check src/workers/site-discovery-service.js && node --check src/workers/journey-qa.js && node --check src/workers/journey-qa-service.js && node --check src/workers/finding-verification.js && node --check src/workers/finding-verification-service.js && node --check src/workers/remediation.js && node --check src/workers/remediation-service.js && node --check src/milestone-b/regression.js && node --check src/milestone-b/repair-intelligence.js && node --check src/milestone-b/repository.js && node --check src/milestone-b/routes.js && node --check src/milestone-c/policy.js && node --check src/milestone-c/repository.js && node --check src/milestone-c/routes.js && node --check src/platform/plans.js && node --check src/platform/auth.js && node --check src/platform/repository.js && node --check src/platform/approvals.js && node --check src/platform/routes.js && node --check src/platform/static.js && node --check web/console/app.js && node --check src/integrations/crypto.js && node --check src/integrations/policy.js && node --check src/integrations/repository.js && node --check src/integrations/delivery.js && node --check src/integrations/routes.js && node --check scripts/backup-database.mjs && node --check scripts/restore-verify.mjs && node --check scripts/benchmark.mjs && node --check scripts/secret-scan.mjs && node --check scripts/release-certify.mjs && node --check src/workers/integration-worker.js && node --check src/workers/integration-service.js && node --check src/milestone-h/domain.js && node --check src/milestone-h/billing.js && node --check src/milestone-h/repository.js && node --check src/milestone-h/routes.js && node --check scripts/production-preflight.mjs && node --check scripts/production-smoke.mjs && npm run validate:json && npm test",
+    "benchmark": "node scripts/benchmark.mjs",
+    "security:scan": "node scripts/secret-scan.mjs",
+    "release:certify": "node scripts/release-certify.mjs",
+    "backup:db": "node scripts/backup-database.mjs",
+    "restore:verify": "node scripts/restore-verify.mjs",
+    "production:preflight": "node scripts/production-preflight.mjs",
+    "production:smoke": "node scripts/production-smoke.mjs"
+  },
+  "dependencies": {
+    "pg": "^8.13.1",
+    "playwright": "1.63.0"
+  }
+}

@@ -1,0 +1,66 @@
+{
+  "name": "Mecordxn8n - Browser QA Dispatch",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "4fbd8792-7f2a-4d12-8c6f-4c12ec5f04c3",
+      "name": "Every Minute",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.MECORDXN8N_BROWSER_QA_URL + '/run-once' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.MECORDXN8N_WORKER_TRIGGER_TOKEN }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "7b6af09b-4306-4d25-bfdb-acde47315e15",
+      "name": "Dispatch One Browser QA Job",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [260, 0]
+    }
+  ],
+  "connections": {
+    "Every Minute": {
+      "main": [
+        [
+          {
+            "node": "Dispatch One Browser QA Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "versionId": "9ecdd8af-55b8-4f31-8ad8-c01b2589cfde",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}

@@ -29,7 +29,10 @@ import {
   createWorkspaceInvite,
   getWorkspaceAccess,
   loginPlatformUser,
+  listPlatformUserSessions,
+  listWorkspaceInvites,
   revokePlatformSession,
+  revokePlatformUserSession,
 } from "./auth.js";
 import { decidePlatformApproval } from "./approvals.js";
 import {
@@ -320,6 +323,34 @@ export async function handlePlatformRoute({
     if (principal.kind === "SESSION") {
       await revokePlatformSession(principal.id);
     }
+    return json(res, 204, {});
+  }
+
+  if (req.method === "GET" && url.pathname === "/v1/platform/sessions") {
+    if (principal.kind !== "SESSION") {
+      return json(res, 403, { error: "SESSION_REQUIRED" });
+    }
+    return json(res, 200, {
+      sessions: await listPlatformUserSessions(principal.userId),
+      currentSessionId: principal.id,
+    });
+  }
+
+  let sessionMatch = url.pathname.match(
+    /^\/v1\/platform\/sessions\/([0-9a-f-]+)\/revoke$/i,
+  );
+  if (req.method === "POST" && sessionMatch) {
+    if (principal.kind !== "SESSION") {
+      return json(res, 403, { error: "SESSION_REQUIRED" });
+    }
+    if (sessionMatch[1] === principal.id) {
+      return json(res, 409, { error: "CURRENT_SESSION_USE_LOGOUT" });
+    }
+    const revoked = await revokePlatformUserSession(
+      principal.userId,
+      sessionMatch[1],
+    );
+    if (!revoked) return json(res, 404, { error: "SESSION_NOT_FOUND" });
     return json(res, 204, {});
   }
 
@@ -711,6 +742,15 @@ export async function handlePlatformRoute({
   match = url.pathname.match(
     /^\/v1\/platform\/workspaces\/([0-9a-f-]+)\/invites$/i,
   );
+  if (req.method === "GET" && match) {
+    await requireWorkspace(principal, match[1], {
+      minimumRole: "ADMIN",
+      apiScope: "members:write",
+    });
+    return json(res, 200, {
+      invites: await listWorkspaceInvites(match[1]),
+    });
+  }
   if (req.method === "POST" && match) {
     await requireWorkspace(principal, match[1], {
       minimumRole: "ADMIN",

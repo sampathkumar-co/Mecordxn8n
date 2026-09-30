@@ -17,6 +17,7 @@ import {
   getIntegrationConnection,
   getIntegrationMetrics,
   leaseIntegrationDelivery,
+  listIntegrationDeliveries,
   listIntegrationConnections,
   markIntegrationWebhookReceiptProcessed,
   recordIntegrationWebhookReceipt,
@@ -119,6 +120,31 @@ export async function handleIntegrationPlatformRoute({
     return json(res, 200, {
       integrations: await listIntegrationConnections(workspaceId),
       metrics: await getIntegrationMetrics(workspaceId),
+    });
+  }
+
+  if (
+    path.length === 6 &&
+    path[5] === "deliveries" &&
+    req.method === "GET"
+  ) {
+    await requireWorkspace(principal, workspaceId, {
+      minimumRole: "VIEWER",
+      apiScope: "workspace:read",
+    });
+    const state = url.searchParams.get("state");
+    if (
+      state &&
+      !["PENDING","RUNNING","SENT","FAILED","DEAD_LETTER","CANCELLED"].includes(state)
+    ) {
+      throw badRequest("integration delivery state is invalid");
+    }
+    return json(res, 200, {
+      deliveries: await listIntegrationDeliveries({
+        workspaceId,
+        state,
+        limit: url.searchParams.get("limit") || 100,
+      }),
     });
   }
 

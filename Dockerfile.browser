@@ -2,6 +2,12 @@ FROM mcr.microsoft.com/playwright:v1.63.0-noble
 
 WORKDIR /app
 
+# Keep the Playwright base aligned with current Ubuntu security fixes while
+# retaining the browser/runtime version match required by Playwright.
+RUN apt-get update \
+    && apt-get install -y --only-upgrade libssl3t64 openssl \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY package.json package-lock.json ./
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 RUN npm ci --omit=dev \

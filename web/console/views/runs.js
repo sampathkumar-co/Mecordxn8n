@@ -22,7 +22,7 @@ export async function renderRuns({ content, signal }) {
       ${metricLocal("Open regressions", regressions.filter((r) => r.status !== "RESOLVED").length, `${monitors.filter((m) => Number(m.consecutive_failures) > 0).length} monitors failing`)}
     </div>
 
-    <div class="toolbar" style="margin-top:10px">
+    <div class="toolbar mt-10">
       <div class="filters"><input id="run-search" type="search" placeholder="Search runs…" aria-label="Search runs"><select id="run-state"><option value="">All states</option><option>QUEUED</option><option>RUNNING</option><option>SUCCEEDED</option><option>FAILED</option><option>DEAD_LETTER</option></select></div>
       <span class="muted">Worker output remains private; only safe operational fields appear here.</span>
     </div>
@@ -47,7 +47,7 @@ export async function renderRuns({ content, signal }) {
       subtitle: "One operational view for queue, execution, retry, success, and dead-letter states.",
     })}
 
-    ${failing.length ? `<div style="margin-top:10px">${panel("Failure recovery", `<div class="panel-body stack">${failing.slice(0,5).map((item) => recoveryBlock({ message: `${item.job_type} is ${item.state}`, code: item.state }, {
+    ${failing.length ? `<div class="mt-10">${panel("Failure recovery", `<div class="panel-body stack">${failing.slice(0,5).map((item) => recoveryBlock({ message: `${item.job_type} is ${item.state}`, code: item.state }, {
       impact: `The ${item.capability} job for ${item.organization_name} did not complete successfully.`,
       next: "Open the target to confirm authorization, inspect related proof, then allow the bounded retry/requeue path rather than replaying mutations.",
     })).join("")}</div>`, { badge: String(failing.length) })}</div>` : ""}

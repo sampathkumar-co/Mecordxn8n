@@ -683,12 +683,16 @@ export async function handlePlatformRoute({
     }
     const target = await getTarget(body.targetId);
     const findings = await listOpportunityFindings(target.id);
-    const proposal = buildClientProposal({ target, findings });
+    const markdown = buildClientProposal({ target, findings });
     const report = await saveReport({
       targetId: target.id,
       kind: "CLIENT_PROPOSAL",
-      markdown: proposal.markdown,
-      summary: proposal.summary,
+      markdown,
+      summary: {
+        verifiedFindings: findings.length,
+        topOpportunityScore:
+          findings[0]?.intelligence?.opportunityScore || 0,
+      },
     });
     return json(res, 201, report);
   }

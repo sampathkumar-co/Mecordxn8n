@@ -95,7 +95,7 @@ export async function renderTargetDetail({ content, signal, route }) {
       { id: "reports", label: "Reports" },
       { id: "activity", label: "Activity" },
     ], "overview")}
-    <div id="target-tab-content" style="margin-top:10px"></div>`;
+    <div id="target-tab-content" class="mt-10"></div>`;
 
   const renderTab = (name) => {
     $$(".tab").forEach((node) => {
@@ -147,7 +147,7 @@ export async function renderTargetDetail({ content, signal, route }) {
       reports: panel("Reports & release gates", `<div class="panel-body">
         <p class="muted">Generated client reports remain READY until an explicit report-release approval. Approved reports can receive expiring secure share links.</p>
         <div class="filters"><button id="target-generate-report" class="button small primary" type="button" ${disabledAttrs(opsAccess)}>Generate report</button><a class="button small" data-link href="/console/approvals">Open report approvals</a></div>
-        ${approvals.filter((a) => a.report_id).length ? `<div style="margin-top:12px">${approvals.filter((a) => a.report_id).map((a) => `<div class="action-item"><span class="action-rank">R</span><div><strong>${escapeHtml(a.action_type)}</strong><p>${escapeHtml(fmtDate(a.created_at))}</p></div>${chip(a.status)}</div>`).join("")}</div>` : ""}
+        ${approvals.filter((a) => a.report_id).length ? `<div class="mt-12">${approvals.filter((a) => a.report_id).map((a) => `<div class="action-item"><span class="action-rank">R</span><div><strong>${escapeHtml(a.action_type)}</strong><p>${escapeHtml(fmtDate(a.created_at))}</p></div>${chip(a.status)}</div>`).join("")}</div>` : ""}
       </div>`),
       activity: panel("Target activity", `<div class="panel-body timeline">${[
         ...jobs.slice(0,8).map((j) => ({ label: `${j.job_type} · ${j.state}`, at: j.created_at })),

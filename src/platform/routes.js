@@ -43,6 +43,7 @@ import {
   getWorkspace,
   getWorkspaceFinding,
   getWorkspaceOverview,
+  getWorkspaceOpportunityDetail,
   getWorkspaceSubscription,
   listUserWorkspaces,
   listWorkspaceApiKeys,
@@ -52,6 +53,7 @@ import {
   listWorkspaceMembers,
   listWorkspaceOperations,
   listWorkspacePipeline,
+  listWorkspaceReports,
   listWorkspaceTargets,
   purgeExpiredWorkspaceData,
   removeWorkspaceMember,
@@ -654,6 +656,21 @@ export async function handlePlatformRoute({
   match = url.pathname.match(
     /^\/v1\/platform\/workspaces\/([0-9a-f-]+)\/reports$/i,
   );
+  if (req.method === "GET" && match) {
+    await requireWorkspace(principal, match[1], {
+      minimumRole: "VIEWER",
+      apiScope: "workspace:read",
+    });
+    const targetId = url.searchParams.get("targetId");
+    if (targetId && !validId(targetId)) throw badRequest("targetId is invalid");
+    return json(res, 200, {
+      reports: await listWorkspaceReports(
+        match[1],
+        targetId || null,
+        url.searchParams.get("limit") || 100,
+      ),
+    });
+  }
   if (req.method === "POST" && match) {
     await requireWorkspace(principal, match[1], {
       minimumRole: "OPERATOR",
@@ -690,6 +707,19 @@ export async function handlePlatformRoute({
         url.searchParams.get("limit") || 100,
       ),
     });
+  }
+
+  match = url.pathname.match(
+    /^\/v1\/platform\/workspaces\/([0-9a-f-]+)\/opportunities\/([0-9a-f-]+)$/i,
+  );
+  if (req.method === "GET" && match) {
+    await requireWorkspace(principal, match[1], {
+      minimumRole: "VIEWER",
+      apiScope: "workspace:read",
+    });
+    const detail = await getWorkspaceOpportunityDetail(match[1], match[2]);
+    if (!detail) return json(res, 404, { error: "OPPORTUNITY_NOT_FOUND" });
+    return json(res, 200, detail);
   }
 
   match = url.pathname.match(

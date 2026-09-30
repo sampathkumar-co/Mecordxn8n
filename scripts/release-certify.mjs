@@ -82,6 +82,27 @@ function hasNonRootUser(file) {
 }
 
 const caddyfile = fs.readFileSync("deploy/Caddyfile", "utf8");
+
+function consoleSources(dir = "web/console") {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const full = dir + "/" + entry.name;
+    if (entry.isDirectory()) return consoleSources(full);
+    if (
+      entry.isFile() &&
+      (entry.name.endsWith(".html") || entry.name.endsWith(".js"))
+    ) {
+      return [full];
+    }
+    return [];
+  });
+}
+
+const uiSources = consoleSources();
+const consoleHasInlineStyles = uiSources.some((file) =>
+  fs.readFileSync(file, "utf8").includes('style="'),
+);
+const consoleIndex = fs.readFileSync("web/console/index.html", "utf8");
+
 const checks = {
   requiredFiles: missingFiles.length === 0,
   inactiveN8nImports: activeWorkflows.length === 0,
@@ -91,6 +112,9 @@ const checks = {
   browserImageNonRoot: hasNonRootUser("Dockerfile.browser"),
   ingressContentSecurityPolicy: /Content-Security-Policy/i.test(caddyfile),
   controlCenterV2Only: !fs.existsSync("web/console/styles.css"),
+  controlCenterCspCompatible:
+    !consoleHasInlineStyles &&
+    !/<form[^>]+method=["']dialog["']/i.test(consoleIndex),
   controlCenterDeepLinks:
     /History API deep links/i.test(fs.readFileSync("docs/UI_UX_V2_PLAN.md", "utf8")) ||
     /History API routing/i.test(fs.readFileSync("docs/UI_UX_V2_PLAN.md", "utf8")),

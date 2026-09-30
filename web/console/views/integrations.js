@@ -22,7 +22,7 @@ export async function renderIntegrations({content,signal}){
   const integrations=data.integrations?.integrations||[];
   const metrics=data.integrations?.metrics||{};
   const deliveries=data.deliveries?.deliveries||[];
-  const access=permission("ADMIN");
+  const access=permission("ADMIN", { operational: true });
 
   content.innerHTML=`
     ${partialBanner(errors)}
@@ -68,7 +68,7 @@ export async function renderIntegrationDetail({content,signal,route}){
   const item=(data.integrations?.integrations||[]).find(i=>i.id===route.params.id);
   if(!item)throw Object.assign(new Error("Integration not found in this workspace."),{status:404});
   const deliveries=(data.deliveries?.deliveries||[]).filter(d=>d.connection_id===item.id);
-  const access=permission("ADMIN");
+  const access=permission("ADMIN", { operational: true });
   const publicConfig=Object.entries(item.publicConfig||{});
 
   content.innerHTML=`

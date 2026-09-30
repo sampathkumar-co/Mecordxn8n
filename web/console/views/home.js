@@ -1,5 +1,6 @@
 import { api, settleRequests } from "../core/api.js";
-import { state, currentWorkspace } from "../core/state.js";\nimport { permission, disabledAttrs } from "../core/permissions.js";
+import { state, currentWorkspace } from "../core/state.js";
+import { permission, disabledAttrs } from "../core/permissions.js";
 import { escapeHtml, fmtMoney, fmtRelative } from "../core/format.js";
 import { chip, metric, panel, partialBanner, setPageMeta, $ } from "../components/ui.js";
 import {

@@ -337,6 +337,8 @@ export async function testIntegration(connection) {
 }
 
 export async function toggleMonitor(monitor, enabled) {
+  const access = permission("OPERATOR", { operational: true });
+  if (!access.allowed) return toast(access.reason, true);
   await api(`/v1/platform/workspaces/${state.workspaceId}/monitors/${monitor.id}/${enabled ? "enable" : "disable"}`, { method: "POST", body: "{}" });
   refreshed(enabled ? "Monitor enabled" : "Monitor disabled");
 }

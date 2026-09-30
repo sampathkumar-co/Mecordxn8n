@@ -413,7 +413,11 @@ export async function listWorkspaceOperations(workspaceId, limit = 100) {
     pool.query(
       `SELECT j.id, j.target_id, t.organization_name, j.job_type,
               j.capability, j.state, j.attempt_count, j.max_attempts,
-              j.cost_units, j.created_at, j.started_at, j.completed_at
+              j.cost_units, j.created_at, j.started_at, j.completed_at,
+              j.lease_owner AS worker_id, j.last_heartbeat_at,
+              j.next_attempt_at,
+              NULLIF(j.input->>'findingId', '') AS finding_id,
+              NULLIF(j.input->>'approvalId', '') AS approval_id
          FROM jobs j
          JOIN targets t ON t.id = j.target_id
         WHERE t.workspace_id = $1

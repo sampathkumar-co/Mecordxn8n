@@ -1,5 +1,7 @@
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 
 import { createServer } from "../src/server.js";
 
@@ -72,4 +74,37 @@ test("unknown console file extensions and traversal-like asset paths are not ser
 
   const encoded = await fetch(baseUrl + "/console/%2e%2e%2fpackage.json");
   assert.equal(encoded.status, 404);
+});
+
+test("Control Center V2 remains CSP-compatible without inline style attributes or nested dialog forms", () => {
+  const root = path.resolve("web/console");
+  const files = [];
+
+  function walk(dir) {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (
+        entry.isFile() &&
+        (entry.name.endsWith(".html") || entry.name.endsWith(".js"))
+      ) {
+        files.push(full);
+      }
+    }
+  }
+
+  walk(root);
+  for (const file of files) {
+    const source = fs.readFileSync(file, "utf8");
+    assert.equal(
+      source.includes('style="'),
+      false,
+      `${path.relative(root, file)} contains an inline style attribute`,
+    );
+  }
+
+  const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
+  assert.equal(/<form[^>]+method=["']dialog["']/i.test(html), false);
+  assert.match(html, /<dialog id="modal" class="modal">\s*<div class="modal-shell">/);
+  assert.match(html, /data-close-dialog="modal"/);
 });

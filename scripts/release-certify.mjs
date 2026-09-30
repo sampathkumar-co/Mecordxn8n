@@ -48,19 +48,51 @@ const sequenceValid = expectedPrefix.every(
   (value, index) => Number(value) === index + 1,
 );
 
+const composeText = [
+  fs.readFileSync("docker-compose.yml", "utf8"),
+  fs.readFileSync("docker-compose.production.yml", "utf8"),
+].join("\n");
+const mutableImageTags = [
+  ...composeText.matchAll(
+    /^\s*image:\s*([^\s#]+:(?:latest|edge|nightly))\s*(?:#.*)?$/gim,
+  ),
+].map((match) => match[1]);
+
+function hasNonRootUser(file) {
+  const text = fs.readFileSync(file, "utf8");
+  return /^\s*USER\s+(?!root\b)\S+/im.test(text);
+}
+
+const caddyfile = fs.readFileSync("deploy/Caddyfile", "utf8");
 const checks = {
   requiredFiles: missingFiles.length === 0,
   inactiveN8nImports: activeWorkflows.length === 0,
   migrationSequence: sequenceValid,
+  immutableRuntimeTags: mutableImageTags.length === 0,
+  controlImageNonRoot: hasNonRootUser("Dockerfile"),
+  browserImageNonRoot: hasNonRootUser("Dockerfile.browser"),
+  ingressContentSecurityPolicy: /Content-Security-Policy/i.test(caddyfile),
   productionVersion: JSON.parse(fs.readFileSync("package.json", "utf8")).version,
 };
 
-if (missingFiles.length || activeWorkflows.length || !sequenceValid) {
+const failedChecks = Object.entries(checks)
+  .filter(([name, value]) => name !== "productionVersion" && value !== true)
+  .map(([name]) => name);
+
+if (
+  missingFiles.length ||
+  activeWorkflows.length ||
+  !sequenceValid ||
+  mutableImageTags.length ||
+  failedChecks.length
+) {
   console.error(JSON.stringify({
     status: "FAILED",
     checks,
+    failedChecks,
     missingFiles,
     activeWorkflows,
+    mutableImageTags,
   }, null, 2));
   process.exit(1);
 }

@@ -459,7 +459,7 @@ export async function getWorkspaceOpportunityDetail(workspaceId, opportunityId) 
     ),
     row.source_report_id
       ? pool.query(
-          `SELECT id, kind, status, summary, created_at, updated_at
+          `SELECT id, kind, status, summary, created_at
              FROM reports
             WHERE id = $1 AND target_id = $2`,
           [row.source_report_id, row.target_id],
@@ -491,7 +491,7 @@ export async function getWorkspaceOpportunityDetail(workspaceId, opportunityId) 
 export async function listWorkspaceReports(workspaceId, targetId = null, limit = 100) {
   const result = await pool.query(
     `SELECT r.id, r.target_id, t.organization_name, r.kind, r.status,
-            r.summary, r.created_at, r.updated_at
+            r.summary, r.created_at
        FROM reports r
        JOIN targets t ON t.id = r.target_id
       WHERE t.workspace_id = $1

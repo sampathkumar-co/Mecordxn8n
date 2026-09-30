@@ -385,7 +385,8 @@ export async function approvalBelongsToWorkspace(approvalId, workspaceId) {
 
 export async function listWorkspacePipeline(workspaceId, limit = 100) {
   const result = await pool.query(
-    `SELECT o.id, o.target_id, t.organization_name, o.title, o.state,
+    `SELECT o.id, o.target_id, t.organization_name, o.primary_finding_id,
+            o.source_report_id, o.title, o.state,
             o.opportunity_score, o.estimated_value_minor, o.currency,
             o.next_action_at, o.created_at, o.updated_at,
             COUNT(DISTINCT a.id) FILTER (WHERE a.state = 'SENT')::int AS sent_actions,
@@ -406,6 +407,100 @@ export async function listWorkspacePipeline(workspaceId, limit = 100) {
     estimated_value_minor:
       row.estimated_value_minor == null ? null : Number(row.estimated_value_minor),
   }));
+}
+
+export async function getWorkspaceOpportunityDetail(workspaceId, opportunityId) {
+  const opportunity = await pool.query(
+    `SELECT o.*, t.organization_name, t.base_url
+       FROM commercial_opportunities o
+       JOIN targets t ON t.id = o.target_id
+      WHERE o.id = $1
+        AND t.workspace_id = $2`,
+    [opportunityId, workspaceId],
+  );
+  if (opportunity.rowCount === 0) return null;
+  const row = opportunity.rows[0];
+
+  const [actions, responses, revenue, services, report] = await Promise.all([
+    pool.query(
+      `SELECT id, kind, channel, state, approval_id, approved_at,
+              sent_at, delivered_by, failure_code, created_at, updated_at
+         FROM commercial_actions
+        WHERE opportunity_id = $1
+        ORDER BY created_at DESC
+        LIMIT 100`,
+      [opportunityId],
+    ),
+    pool.query(
+      `SELECT id, response_type, summary, occurred_at, created_at
+         FROM commercial_responses
+        WHERE opportunity_id = $1
+        ORDER BY occurred_at DESC
+        LIMIT 100`,
+      [opportunityId],
+    ),
+    pool.query(
+      `SELECT id, kind, amount_minor, currency, external_reference,
+              occurred_at, created_at
+         FROM revenue_events
+        WHERE opportunity_id = $1
+        ORDER BY occurred_at DESC
+        LIMIT 100`,
+      [opportunityId],
+    ),
+    pool.query(
+      `SELECT id, name, status, amount_minor, currency, renewal_at,
+              cadence_days, created_at, updated_at
+         FROM service_agreements
+        WHERE opportunity_id = $1
+        ORDER BY created_at DESC
+        LIMIT 100`,
+      [opportunityId],
+    ),
+    row.source_report_id
+      ? pool.query(
+          `SELECT id, kind, status, summary, created_at, updated_at
+             FROM reports
+            WHERE id = $1 AND target_id = $2`,
+          [row.source_report_id, row.target_id],
+        )
+      : Promise.resolve({ rows: [] }),
+  ]);
+
+  return {
+    opportunity: {
+      ...row,
+      opportunity_score: Number(row.opportunity_score),
+      estimated_value_minor:
+        row.estimated_value_minor == null ? null : Number(row.estimated_value_minor),
+    },
+    report: report.rows[0] || null,
+    actions: actions.rows,
+    responses: responses.rows,
+    revenueEvents: revenue.rows.map((item) => ({
+      ...item,
+      amount_minor: Number(item.amount_minor),
+    })),
+    services: services.rows.map((item) => ({
+      ...item,
+      amount_minor: item.amount_minor == null ? null : Number(item.amount_minor),
+    })),
+  };
+}
+
+export async function listWorkspaceReports(workspaceId, targetId = null, limit = 100) {
+  const result = await pool.query(
+    `SELECT r.id, r.target_id, t.organization_name, r.kind, r.status,
+            r.summary, r.created_at, r.updated_at
+       FROM reports r
+       JOIN targets t ON t.id = r.target_id
+      WHERE t.workspace_id = $1
+        AND ($2::uuid IS NULL OR r.target_id = $2)
+      ORDER BY r.created_at DESC
+      LIMIT $3`,
+    [workspaceId, targetId || null, safeLimit(limit)],
+  );
+  return result.rows;
 }
 
 export async function listWorkspaceOperations(workspaceId, limit = 100) {

@@ -11,7 +11,7 @@ function refreshed(message = "") {
 }
 
 export function openTargetForm() {
-  const access = permission("OPERATOR");
+  const access = permission("OPERATOR", { operational: true });
   openModal("Register target", "AUTHORIZED SCOPE", `
     <form id="target-form">
       <div class="form-grid">
@@ -57,7 +57,7 @@ export async function openAuthorizationCenter(targetId) {
   const center = await api(`/v1/platform/workspaces/${state.workspaceId}/targets/${targetId}/authorization-center`);
   const current = center.currentAuthorization;
   const verified = (center.domainVerifications || []).some((item) => item.status === "VERIFIED");
-  const access = permission("ADMIN");
+  const access = permission("ADMIN", { operational: true });
   const history = (center.authorizationHistory || []).slice(0, 12);
   openModal("Authorization center", "TARGET TRUST BOUNDARY", `
     <div class="detail-grid">
@@ -201,7 +201,7 @@ const integrationEvents = [
 ];
 
 export function openIntegrationForm() {
-  const access = permission("ADMIN");
+  const access = permission("ADMIN", { operational: true });
   openModal("Add integration", "ENCRYPTED PROVIDER CONFIG", `
     <form id="integration-form">
       <div class="form-grid">
@@ -255,7 +255,7 @@ export function openIntegrationForm() {
 }
 
 export function openMonitorForm(target) {
-  const access = permission("OPERATOR");
+  const access = permission("OPERATOR", { operational: true });
   openModal("Create monitor", "CONTINUOUS QA", `
     <form id="monitor-form"><div class="form-grid">
       <label>Name<input name="name" maxlength="160" value="Continuous QA" required></label>
@@ -283,7 +283,7 @@ export function openMonitorForm(target) {
 }
 
 export function openRepairRequest(finding) {
-  const access = permission("OPERATOR");
+  const access = permission("OPERATOR", { operational: true });
   openModal("Request source repair", "HUMAN APPROVAL REQUIRED", `
     <div class="risk-summary"><strong>This does not start source changes.</strong><div>A human approval request is created first. Current authorization is rechecked again before execution.</div></div>
     <form id="repair-request-form" style="margin-top:12px">
@@ -304,7 +304,7 @@ export function openRepairRequest(finding) {
 }
 
 export async function decideApproval(approval, decision) {
-  const access = permission("ADMIN");
+  const access = permission("ADMIN", { operational: true });
   if (!access.allowed) return toast(access.reason, true);
   const approve = decision === "approve";
   await confirmDecision({
@@ -325,7 +325,7 @@ export async function decideApproval(approval, decision) {
 }
 
 export async function toggleIntegration(connection, enabled) {
-  const access = permission("ADMIN");
+  const access = permission("ADMIN", { operational: true });
   if (!access.allowed) return toast(access.reason, true);
   await api(`/v1/platform/workspaces/${state.workspaceId}/integrations/${connection.id}/${enabled ? "enable" : "disable"}`, { method: "POST", body: "{}" });
   refreshed(enabled ? "Integration enabled" : "Integration disabled");

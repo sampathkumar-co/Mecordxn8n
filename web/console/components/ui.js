@@ -101,7 +101,7 @@ export function entityHeader({ eyebrow = "", title, subtitle = "", badges = [], 
       ${eyebrow ? `<p class="eyebrow">${escapeHtml(eyebrow)}</p>` : ""}
       <h1>${escapeHtml(title)}</h1>
       ${subtitle ? `<div class="entity-subtitle">${escapeHtml(subtitle)}</div>` : ""}
-      ${badges.length ? `<div class="authorization-summary" style="margin-top:8px">${badges.map((b) => chip(b)).join("")}</div>` : ""}
+      ${badges.length ? `<div class="authorization-summary mt-8">${badges.map((b) => chip(b)).join("")}</div>` : ""}
     </div>
     <div class="entity-actions">${actions}</div>
   </header>`;

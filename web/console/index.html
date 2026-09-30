@@ -4,28 +4,37 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#f7f8fa">
   <title>Mecordxn8n Control Center</title>
-  <link rel="stylesheet" href="/console/styles.css">
+  <link rel="stylesheet" href="/console/styles/tokens.css">
+  <link rel="stylesheet" href="/console/styles/base.css">
+  <link rel="stylesheet" href="/console/styles/layout.css">
+  <link rel="stylesheet" href="/console/styles/components.css">
+  <link rel="stylesheet" href="/console/styles/views.css">
 </head>
 <body>
+  <a class="skip-link" href="#content">Skip to content</a>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <main id="auth-view" class="auth-view">
-    <section class="auth-brand">
-      <div class="brand-mark">M</div>
-      <div>
-        <p class="eyebrow">MECORD × N8N</p>
-        <h1>Problem → Proof → Repair → Revenue.</h1>
-        <p class="auth-copy">An authorization-gated engineering control plane for verified quality, remediation, and commercial operations.</p>
+    <section class="auth-brand" aria-labelledby="auth-product-title">
+      <div class="brand-lockup">
+        <span class="brand-mark" aria-hidden="true">M</span>
+        <div><strong>Mecordxn8n</strong><span>Engineering control plane</span></div>
       </div>
-      <div class="trust-list">
-        <div><strong>Evidence first</strong><span>Independent verification before repair.</span></div>
-        <div><strong>Human gates</strong><span>Approvals remain explicit and auditable.</span></div>
-        <div><strong>Fail closed</strong><span>Scope, consent, leases, and budgets are revalidated.</span></div>
+      <div class="auth-message">
+        <p class="eyebrow">PROBLEM → PROOF → REPAIR → REVENUE</p>
+        <h1 id="auth-product-title">Engineering decisions backed by evidence.</h1>
+        <p>Authorization-gated quality, remediation, and commercial operations with explicit human control.</p>
       </div>
+      <dl class="trust-grid">
+        <div><dt>Evidence first</dt><dd>Independent verification before repair.</dd></div>
+        <div><dt>Human gates</dt><dd>High-impact actions remain explicit and auditable.</dd></div>
+        <div><dt>Fail closed</dt><dd>Scope, consent, leases, and budgets are revalidated.</dd></div>
+      </dl>
     </section>
 
-    <section class="auth-panel">
+    <section class="auth-panel" aria-label="Account access">
       <form id="login-form" class="auth-card">
         <div>
           <p class="eyebrow">CONTROL CENTER</p>
@@ -43,9 +52,9 @@
         <div>
           <p class="eyebrow">14-DAY TEAM TRIAL</p>
           <h2>Create workspace</h2>
-          <p class="muted">Start with non-destructive QA. Privileged source access is unlocked only after ownership verification.</p>
+          <p class="muted">Start with non-destructive QA. Privileged source access unlocks only after ownership verification.</p>
         </div>
-        <label>Your name<input id="signup-name" maxlength="160" required></label>
+        <label>Your name<input id="signup-name" maxlength="160" autocomplete="name" required></label>
         <label>Email<input id="signup-email" type="email" autocomplete="email" required></label>
         <label>Password<input id="signup-password" type="password" minlength="12" maxlength="128" autocomplete="new-password" required></label>
         <label>Workspace name<input id="signup-workspace" maxlength="160" required></label>
@@ -58,12 +67,12 @@
         <div>
           <p class="eyebrow">ONE-TIME SETUP</p>
           <h2>Bootstrap owner</h2>
-          <p class="muted">Works only before the first platform user exists.</p>
+          <p class="muted">Available only before the first platform user exists.</p>
         </div>
-        <label>Bootstrap token<input id="bootstrap-token" type="password" required></label>
+        <label>Bootstrap token<input id="bootstrap-token" type="password" autocomplete="off" required></label>
         <label>Owner name<input id="bootstrap-name" maxlength="160" required></label>
-        <label>Owner email<input id="bootstrap-email" type="email" required></label>
-        <label>Password<input id="bootstrap-password" type="password" minlength="12" maxlength="128" required></label>
+        <label>Owner email<input id="bootstrap-email" type="email" autocomplete="email" required></label>
+        <label>Password<input id="bootstrap-password" type="password" minlength="12" maxlength="128" autocomplete="new-password" required></label>
         <label>Workspace name<input id="bootstrap-workspace" maxlength="160" required></label>
         <label>Workspace slug<input id="bootstrap-slug" maxlength="80" pattern="[A-Za-z0-9-]+"></label>
         <button class="button primary" type="submit">Create workspace</button>
@@ -73,58 +82,115 @@
   </main>
 
   <div id="app-view" class="app-shell hidden">
-    <aside class="sidebar">
-      <div class="sidebar-brand">
-        <div class="brand-mark small">M</div>
-        <div><strong>Mecordxn8n</strong><span>Control Center</span></div>
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-head">
+        <a class="brand-lockup compact" href="/console/home" data-link>
+          <span class="brand-mark small" aria-hidden="true">M</span>
+          <span class="brand-copy"><strong>Mecordxn8n</strong><small>Control Center</small></span>
+        </a>
+        <button id="sidebar-toggle" class="icon-button rail-toggle" type="button" aria-label="Collapse navigation" aria-expanded="true">‹</button>
       </div>
 
       <div class="workspace-control">
-        <span class="label">Workspace</span>
-        <select id="workspace-select" aria-label="Workspace"></select>
+        <label for="workspace-select">Workspace</label>
+        <select id="workspace-select"></select>
       </div>
 
-      <nav id="nav" class="nav" aria-label="Primary">
-        <button data-view="overview" class="nav-item active"><span>Overview</span><kbd>1</kbd></button>
-        <button data-view="launch" class="nav-item"><span>Launch</span><kbd>2</kbd></button>
-        <button data-view="targets" class="nav-item"><span>Targets</span><kbd>3</kbd></button>
-        <button data-view="findings" class="nav-item"><span>Findings</span><kbd>4</kbd></button>
-        <button data-view="approvals" class="nav-item"><span>Approvals</span><kbd>5</kbd></button>
-        <button data-view="pipeline" class="nav-item"><span>Pipeline</span><kbd>6</kbd></button>
-        <button data-view="operations" class="nav-item"><span>Operations</span><kbd>7</kbd></button>
-        <button data-view="integrations" class="nav-item"><span>Integrations</span><kbd>8</kbd></button>
-        <button data-view="team" class="nav-item"><span>Team & Access</span><kbd>9</kbd></button>
-        <button data-view="audit" class="nav-item"><span>Audit</span></button>
-        <button id="operator-nav" data-view="operator" class="nav-item hidden"><span>Operator</span></button>
+      <nav id="nav" class="nav-groups" aria-label="Primary navigation">
+        <a href="/console/home" data-link data-area="home" class="nav-primary"><span class="nav-icon" aria-hidden="true">⌂</span><span>Home</span></a>
+
+        <section class="nav-group" data-area-group="engineering">
+          <div class="nav-group-title"><span>Engineering</span><small>Problem → Proof</small></div>
+          <a href="/console/targets" data-link data-route-name="targets">Targets</a>
+          <a href="/console/findings" data-link data-route-name="findings">Findings</a>
+          <a href="/console/runs" data-link data-route-name="runs">Runs & regressions</a>
+        </section>
+
+        <section class="nav-group" data-area-group="repair">
+          <div class="nav-group-title"><span>Repair</span><small>Proof → Repair</small></div>
+          <a href="/console/approvals" data-link data-route-name="approvals">Approval inbox</a>
+          <a href="/console/repairs" data-link data-route-name="repairs">Repair queue</a>
+        </section>
+
+        <section class="nav-group" data-area-group="revenue">
+          <div class="nav-group-title"><span>Revenue</span><small>Repair → Revenue</small></div>
+          <a href="/console/revenue" data-link data-route-name="revenue">Opportunities</a>
+        </section>
+
+        <section class="nav-group" data-area-group="workspace">
+          <div class="nav-group-title"><span>Workspace</span><small>Access & operations</small></div>
+          <a href="/console/integrations" data-link data-route-name="integrations">Integrations</a>
+          <a href="/console/workspace/access" data-link data-route-name="workspace">Team & access</a>
+          <a href="/console/workspace/billing" data-link data-route-name="workspace">Billing & usage</a>
+          <a href="/console/workspace/audit" data-link data-route-name="workspace">Audit & retention</a>
+        </section>
+
+        <a id="operator-nav" href="/console/operator" data-link data-route-name="operator" class="nav-primary operator-link hidden"><span class="nav-icon" aria-hidden="true">◇</span><span>Platform operator</span></a>
       </nav>
 
       <div class="sidebar-foot">
+        <button id="command-sidebar" class="sidebar-command" type="button"><span>Search & commands</span><kbd>⌘ K</kbd></button>
         <div id="user-chip" class="user-chip"></div>
-        <button id="logout-button" class="button subtle">Sign out</button>
+        <button id="logout-button" class="button subtle full" type="button">Sign out</button>
       </div>
     </aside>
 
     <section class="main">
-      <header class="topbar">
-        <div>
-          <p id="view-kicker" class="eyebrow">WORKSPACE</p>
-          <h1 id="view-title">Overview</h1>
+      <header class="context-bar">
+        <div class="context-left">
+          <button id="mobile-menu" class="icon-button mobile-only" type="button" aria-label="Open navigation">☰</button>
+          <nav id="breadcrumb" class="breadcrumb" aria-label="Breadcrumb"></nav>
         </div>
-        <div class="top-actions">
-          <span id="connection-badge" class="status-pill good">Control API online</span>
-          <button id="refresh-button" class="button subtle">Refresh</button>
-          <button id="primary-action" class="button primary">Add target</button>
+        <div class="context-actions">
+          <button id="command-button" class="command-button" type="button" aria-label="Search and commands"><span>Search</span><kbd>Ctrl K</kbd></button>
+          <span id="role-badge" class="status-pill neutral"></span>
+          <span id="connection-badge" class="status-pill good">● Online</span>
+          <button id="refresh-button" class="icon-button" type="button" aria-label="Refresh current view">↻</button>
+          <button id="primary-action" class="button primary compact" type="button">Add target</button>
         </div>
       </header>
-      <div id="content" class="content" tabindex="-1"></div>
+      <div id="page-meta" class="page-meta" aria-live="polite"></div>
+      <main id="content" class="content" tabindex="-1"></main>
     </section>
+
+    <nav class="mobile-nav" aria-label="Mobile navigation">
+      <a href="/console/home" data-link data-mobile-area="home">Home</a>
+      <a href="/console/findings" data-link data-mobile-area="engineering">Engineering</a>
+      <a href="/console/approvals" data-link data-mobile-area="repair">Approvals</a>
+      <a href="/console/workspace/access" data-link data-mobile-area="workspace">Workspace</a>
+    </nav>
   </div>
 
   <dialog id="modal" class="modal">
     <form method="dialog" class="modal-shell">
-      <header><div><p id="modal-kicker" class="eyebrow">ACTION</p><h2 id="modal-title"></h2></div><button value="cancel" class="icon-button" aria-label="Close">×</button></header>
+      <header>
+        <div><p id="modal-kicker" class="eyebrow">ACTION</p><h2 id="modal-title"></h2></div>
+        <button value="cancel" class="icon-button" aria-label="Close dialog">×</button>
+      </header>
       <div id="modal-content" class="modal-content"></div>
     </form>
+  </dialog>
+
+  <dialog id="drawer" class="drawer">
+    <form method="dialog" class="drawer-shell">
+      <header>
+        <div><p id="drawer-kicker" class="eyebrow">DETAIL</p><h2 id="drawer-title"></h2></div>
+        <button value="cancel" class="icon-button" aria-label="Close detail">×</button>
+      </header>
+      <div id="drawer-content" class="drawer-content"></div>
+    </form>
+  </dialog>
+
+  <dialog id="command-palette" class="command-palette">
+    <div class="palette-shell">
+      <label class="palette-search">
+        <span class="visually-hidden">Search commands</span>
+        <input id="palette-input" type="search" autocomplete="off" placeholder="Jump to a target, finding, approval, or command…">
+        <kbd>Esc</kbd>
+      </label>
+      <div id="palette-results" class="palette-results" role="listbox" aria-label="Command results"></div>
+      <footer><span>↑↓ navigate</span><span>↵ open</span><span>Results stay inside this workspace</span></footer>
+    </div>
   </dialog>
 
   <script type="module" src="/console/app.js"></script>

@@ -1,5 +1,5 @@
 import { api, settleRequests } from "../core/api.js";
-import { state, currentWorkspace } from "../core/state.js";
+import { state, currentWorkspace } from "../core/state.js";\nimport { permission, disabledAttrs } from "../core/permissions.js";
 import { escapeHtml, fmtMoney, fmtRelative } from "../core/format.js";
 import { chip, metric, panel, partialBanner, setPageMeta, $ } from "../components/ui.js";
 import {
@@ -70,10 +70,27 @@ export async function renderHome({ content, signal }) {
 
   const firstTarget = targets[0] || null;
   const checklist = onboarding.checklist || {};
+  const operationsAccess = permission("OPERATOR", { operational: true });
   if (!checklist.targetRegistered) {
-    queue.push({ priority: Date.now() + 5000, html: actionItem(6, "Register the first target", "Start with explicitly authorized non-destructive QA.", '<button class="button small primary" id="home-add-target" type="button">Add target</button>') });
+    queue.push({
+      priority: Date.now() + 5000,
+      html: actionItem(
+        6,
+        "Register the first target",
+        operationsAccess.allowed ? "Start with explicitly authorized non-destructive QA." : operationsAccess.reason,
+        `<button class="button small primary" id="home-add-target" type="button" ${disabledAttrs(operationsAccess)}>Add target</button>`,
+      ),
+    });
   } else if (!checklist.assessmentStarted && firstTarget) {
-    queue.push({ priority: Date.now() + 5000, html: actionItem(6, "Run the first assessment", "Queues only capabilities already authorized for this target.", '<button class="button small primary" id="home-run-assessment" type="button">Run assessment</button>') });
+    queue.push({
+      priority: Date.now() + 5000,
+      html: actionItem(
+        6,
+        "Run the first assessment",
+        operationsAccess.allowed ? "Queues only capabilities already authorized for this target." : operationsAccess.reason,
+        `<button class="button small primary" id="home-run-assessment" type="button" ${disabledAttrs(operationsAccess)}>Run assessment</button>`,
+      ),
+    });
   }
 
   queue.sort((a, b) => a.priority - b.priority);

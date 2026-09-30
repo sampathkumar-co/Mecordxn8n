@@ -160,6 +160,7 @@ export function openInviteForm() {
     });
     $("#modal-content").innerHTML = `<p class="muted">Share this one-time token through a trusted channel. It expires automatically.</p><pre class="code-block" id="invite-token"></pre>`;
     $("#invite-token").textContent = result.inviteToken;
+    $("#modal").addEventListener("close", () => refreshed(), { once: true });
     toast("Invite created");
   });
 }
@@ -191,7 +192,7 @@ export function openApiKeyForm() {
     $("#modal-content").innerHTML = `<p><strong>Copy this key now.</strong> It is never shown again.</p><pre class="code-block" id="new-key-secret"></pre>`;
     $("#new-key-secret").textContent = result.secret;
     toast("API key created");
-    document.addEventListener("close", () => refreshed(), { once: true });
+    $("#modal").addEventListener("close", () => refreshed(), { once: true });
   });
 }
 

@@ -743,6 +743,72 @@ export function accessAllows(access, {
   return (ROLE_RANK[access.role] || 0) >= (ROLE_RANK[minimumRole] || 0);
 }
 
+export async function listWorkspaceInvites(workspaceId) {
+  const result = await pool.query(
+    `SELECT id, workspace_id, email, role, created_by,
+            expires_at, accepted_at, created_at
+       FROM workspace_invites
+      WHERE workspace_id = $1
+      ORDER BY created_at DESC
+      LIMIT 200`,
+    [workspaceId],
+  );
+  return result.rows.map((row) => ({
+    id: row.id,
+    workspaceId: row.workspace_id,
+    email: row.email,
+    role: row.role,
+    createdBy: row.created_by,
+    expiresAt: row.expires_at,
+    acceptedAt: row.accepted_at,
+    createdAt: row.created_at,
+    status: row.accepted_at
+      ? "ACCEPTED"
+      : new Date(row.expires_at).getTime() <= Date.now()
+        ? "EXPIRED"
+        : "PENDING",
+  }));
+}
+
+export async function listPlatformUserSessions(userId) {
+  const result = await pool.query(
+    `SELECT id, user_agent_hash, expires_at, revoked_at,
+            last_seen_at, created_at
+       FROM platform_sessions
+      WHERE user_id = $1
+      ORDER BY created_at DESC
+      LIMIT 100`,
+    [userId],
+  );
+  return result.rows.map((row) => ({
+    id: row.id,
+    userAgentFingerprint: row.user_agent_hash
+      ? row.user_agent_hash.slice(0, 12)
+      : null,
+    expiresAt: row.expires_at,
+    revokedAt: row.revoked_at,
+    lastSeenAt: row.last_seen_at,
+    createdAt: row.created_at,
+    status: row.revoked_at
+      ? "REVOKED"
+      : new Date(row.expires_at).getTime() <= Date.now()
+        ? "EXPIRED"
+        : "ACTIVE",
+  }));
+}
+
+export async function revokePlatformUserSession(userId, sessionId) {
+  const result = await pool.query(
+    `UPDATE platform_sessions
+        SET revoked_at = COALESCE(revoked_at, now())
+      WHERE id = $1
+        AND user_id = $2
+      RETURNING id`,
+    [sessionId, userId],
+  );
+  return result.rowCount > 0;
+}
+
 export async function revokePlatformSession(sessionId) {
   await pool.query(
     "UPDATE platform_sessions SET revoked_at = now() WHERE id = $1",

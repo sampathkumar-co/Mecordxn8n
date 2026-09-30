@@ -167,12 +167,12 @@ async function renderBilling({ content, signal, wid, workspace, section }) {
             ${detail("Trial ends",fmtDate(subscription.subscription?.trial_ends_at))}
             ${detail("Seats",subscription.subscription?.seats??subscription.counts?.members??"—")}
           </div>
-          <div class="filters" style="margin-top:12px">
+          <div class="filters mt-12">
             <button id="billing-team" class="button small" type="button" ${disabledAttrs(ownerAccess)}>Team</button>
             <button id="billing-business" class="button primary small" type="button" ${disabledAttrs(ownerAccess)}>Business</button>
             <button id="billing-portal" class="button small" type="button" ${disabledAttrs(ownerAccess)}>Customer portal</button>
           </div>
-          <p class="muted" style="margin:10px 0 0">Checkout and the Customer Portal are hosted by Stripe. Card data does not pass through Mecordxn8n.</p>
+          <p class="muted my-10">Checkout and the Customer Portal are hosted by Stripe. Card data does not pass through Mecordxn8n.</p>
         </div>`,{badge:status})}
         ${panel("Usage boundaries",`<div class="panel-body detail-grid">
           ${detail("API keys",subscription.counts?.apiKeys??"—")}${detail("API-key limit",subscription.limits?.apiKeys??"∞")}
@@ -212,10 +212,10 @@ async function renderAudit({ content, signal, wid, workspace, section }) {
         })}
         ${panel("Retention policy",`<div class="panel-body">
           <form id="retention-form" class="filters">
-            <label style="min-width:180px">Retention days<input name="retentionDays" type="number" min="7" max="3650" value="${escapeHtml(retentionDays)}" ${disabledAttrs(ownerAccess)}></label>
+            <label class="min-w-180">Retention days<input name="retentionDays" type="number" min="7" max="3650" value="${escapeHtml(retentionDays)}" ${disabledAttrs(ownerAccess)}></label>
             <button class="button primary small" type="submit" ${disabledAttrs(ownerAccess)}>Update policy</button>
           </form>
-          <p class="muted" style="margin:9px 0 0">Retention changes are owner-only and bounded between 7 and 3650 days.</p>
+          <p class="muted my-9">Retention changes are owner-only and bounded between 7 and 3650 days.</p>
         </div>`)}
         <section class="danger-zone">
           <p class="eyebrow">DANGER ZONE</p><h2>Delete workspace</h2>

@@ -162,23 +162,23 @@
   </div>
 
   <dialog id="modal" class="modal">
-    <form method="dialog" class="modal-shell">
+    <div class="modal-shell">
       <header>
         <div><p id="modal-kicker" class="eyebrow">ACTION</p><h2 id="modal-title"></h2></div>
-        <button value="cancel" class="icon-button" aria-label="Close dialog">×</button>
+        <button type="button" data-close-dialog="modal" class="icon-button" aria-label="Close dialog">×</button>
       </header>
       <div id="modal-content" class="modal-content"></div>
-    </form>
+    </div>
   </dialog>
 
   <dialog id="drawer" class="drawer">
-    <form method="dialog" class="drawer-shell">
+    <div class="drawer-shell">
       <header>
         <div><p id="drawer-kicker" class="eyebrow">DETAIL</p><h2 id="drawer-title"></h2></div>
-        <button value="cancel" class="icon-button" aria-label="Close detail">×</button>
+        <button type="button" data-close-dialog="drawer" class="icon-button" aria-label="Close detail">×</button>
       </header>
       <div id="drawer-content" class="drawer-content"></div>
-    </form>
+    </div>
   </dialog>
 
   <dialog id="command-palette" class="command-palette">

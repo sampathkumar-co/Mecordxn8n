@@ -95,7 +95,7 @@ export async function renderFindingDetail({ content, signal, route }) {
   const relatedApprovals = (data.approvals?.approvals || []).filter((a) => a.finding_id === id);
   const remediationApproval = relatedApprovals.find((a) => a.action_type === "SOURCE_REMEDIATION");
   const sourceAuthorized = current.mode === "CLIENT_AUTHORIZED" && capabilities.includes("SOURCE_REMEDIATION");
-  const repairAccess = permission("OPERATOR");
+  const repairAccess = permission("OPERATOR", { operational: true });
   const repairEligible = finding.verification_state === "VERIFIED" && sourceAuthorized && repairAccess.allowed;
   const evidence = finding.evidence || {};
   const verification = finding.verifications?.[0] || null;

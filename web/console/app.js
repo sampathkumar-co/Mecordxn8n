@@ -51,7 +51,6 @@ const routePrimaryActions = {
   home: ["Add target", openTargetForm],
   targets: ["Add target", openTargetForm],
   integrations: ["Add integration", openIntegrationForm],
-  workspace: ["Invite member", openInviteForm],
 };
 
 function showAuth() {
@@ -105,9 +104,16 @@ function updateNavigation(route) {
   $("#breadcrumb").innerHTML = breadcrumbFor(route);
   document.title = `${routeLabel(route)} · Mecordxn8n`;
 
-  $$("[data-link][data-area], [data-link][data-route-name]").forEach((node) => {
+  $("[data-link][data-area], [data-link][data-route-name]").forEach((node) => {
+    const nodePath = new URL(node.href, location.href).pathname.replace(/\/$/, "");
+    const routePath = route.pathname.replace(/\/$/, "");
+    const workspaceExact =
+      node.dataset.routeName === "workspace" &&
+      route.name === "workspace" &&
+      nodePath === routePath;
     const active = node.dataset.area === route.area ||
-      node.dataset.routeName === route.name ||
+      workspaceExact ||
+      (node.dataset.routeName === route.name && route.name !== "workspace") ||
       (node.dataset.routeName === "targets" && route.name === "target-detail") ||
       (node.dataset.routeName === "findings" && route.name === "finding-detail") ||
       (node.dataset.routeName === "approvals" && route.name === "approval-detail") ||

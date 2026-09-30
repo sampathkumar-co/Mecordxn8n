@@ -3,7 +3,7 @@ import { state } from "../core/state.js";
 import { permission, disabledAttrs } from "../core/permissions.js";
 import { escapeHtml, fmtDate, fmtRelative, hostname, remaining } from "../core/format.js";
 import { chip, detail, entityHeader, panel, partialBanner, setPageMeta, tablePanel, tabs, $, $$, emptyState, toast } from "../components/ui.js";
-import { openAuthorizationCenter, openMonitorForm, runAssessment, toggleMonitor, createReport } from "../components/actions.js";
+import { openAuthorizationCenter, openMonitorForm, runAssessment, toggleMonitor, createReport, requestReportRelease, shareReport } from "../components/actions.js";
 
 export async function renderTargets({ content, signal }) {
   const data = await api(`/v1/platform/workspaces/${state.workspaceId}/targets?limit=200`, { signal, cacheMs: 7000 });
@@ -60,6 +60,7 @@ export async function renderTargetDetail({ content, signal, route }) {
     findings: api(`/v1/platform/workspaces/${wid}/findings?limit=300`, { signal, cacheMs: 5000 }),
     operations: api(`/v1/platform/workspaces/${wid}/operations?limit=300`, { signal, cacheMs: 5000 }),
     approvals: api(`/v1/platform/workspaces/${wid}/approvals?limit=200`, { signal, cacheMs: 5000 }),
+    reports: api(`/v1/platform/workspaces/${wid}/reports?targetId=${id}&limit=100`, { signal, cacheMs: 5000 }),
   });
   if (signal.aborted) return;
   const target = (data.targets?.targets || []).find((item) => item.id === id);
@@ -73,6 +74,7 @@ export async function renderTargetDetail({ content, signal, route }) {
   const monitors = (data.operations?.monitors || []).filter((item) => item.target_id === id);
   const regressions = (data.operations?.regressions || []).filter((item) => item.target_id === id);
   const approvals = (data.approvals?.approvals || []).filter((item) => item.target_id === id);
+  const reports = data.reports?.reports || [];
   const sourceCap = (current.allowed_capabilities || current.allowedCapabilities || []).includes("SOURCE_REMEDIATION");
   const opsAccess = permission("OPERATOR", { operational: true });
   const adminAccess = permission("ADMIN", { operational: true });
@@ -92,7 +94,7 @@ export async function renderTargetDetail({ content, signal, route }) {
       { id: "runs", label: "Runs", count: jobs.length },
       { id: "monitoring", label: "Monitoring", count: monitors.length },
       { id: "authorization", label: "Authorization" },
-      { id: "reports", label: "Reports" },
+      { id: "reports", label: "Reports", count: reports.length },
       { id: "activity", label: "Activity" },
     ], "overview")}
     <div id="target-tab-content" class="mt-10"></div>`;
@@ -147,8 +149,19 @@ export async function renderTargetDetail({ content, signal, route }) {
       reports: panel("Reports & release gates", `<div class="panel-body">
         <p class="muted">Generated client reports remain READY until an explicit report-release approval. Approved reports can receive expiring secure share links.</p>
         <div class="filters"><button id="target-generate-report" class="button small primary" type="button" ${disabledAttrs(opsAccess)}>Generate report</button><a class="button small" data-link href="/console/approvals">Open report approvals</a></div>
-        ${approvals.filter((a) => a.report_id).length ? `<div class="mt-12">${approvals.filter((a) => a.report_id).map((a) => `<div class="action-item"><span class="action-rank">R</span><div><strong>${escapeHtml(a.action_type)}</strong><p>${escapeHtml(fmtDate(a.created_at))}</p></div>${chip(a.status)}</div>`).join("")}</div>` : ""}
-      </div>`),
+      </div>
+      ${reports.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>Kind</th><th>Status</th><th>Created</th><th>Release gate</th><th>Action</th></tr></thead><tbody>
+        ${reports.map((report) => {
+          const approval = approvals.find((item) => item.report_id === report.id && item.action_type === "REPORT_RELEASE");
+          const action = report.status === "APPROVED"
+            ? `<button class="button small report-share" data-report-id="${report.id}" type="button" ${disabledAttrs(adminAccess)}>Create secure share</button>`
+            : approval?.status === "PENDING"
+              ? `<a class="button small" data-link href="/console/approvals/${approval.id}">Review approval</a>`
+              : `<button class="button small report-release" data-report-id="${report.id}" type="button" ${disabledAttrs(adminAccess)}>Request release</button>`;
+          return `<tr><td>${escapeHtml(report.kind)}</td><td>${chip(report.status)}</td><td>${escapeHtml(fmtDate(report.created_at))}</td><td>${approval ? chip(approval.status) : "—"}</td><td>${action}</td></tr>`;
+        }).join("")}
+      </tbody></table></div>` : `<div class="empty"><strong>No reports yet</strong>Generate a proposal after authorized assessment and verification.</div>`}
+      `),
       activity: panel("Target activity", `<div class="panel-body timeline">${[
         ...jobs.slice(0,8).map((j) => ({ label: `${j.job_type} · ${j.state}`, at: j.created_at })),
         ...approvals.slice(0,8).map((a) => ({ label: `${a.action_type} · ${a.status}`, at: a.created_at })),
@@ -158,7 +171,13 @@ export async function renderTargetDetail({ content, signal, route }) {
 
     $("#auth-tab-open")?.addEventListener("click", () => openAuthorizationCenter(id));
     $("#target-generate-report")?.addEventListener("click", () => createReport(id).catch((e) => toast(e.message, true)));
-    $$(".monitor-toggle").forEach((button) => {
+    $(".report-release").forEach((button) => {
+      button.addEventListener("click", () => requestReportRelease(button.dataset.reportId).catch((e) => toast(e.message, true)));
+    });
+    $(".report-share").forEach((button) => {
+      button.addEventListener("click", () => shareReport(button.dataset.reportId).catch((e) => toast(e.message, true)));
+    });
+    $(".monitor-toggle").forEach((button) => {
       button.addEventListener("click", () => {
         const monitor = monitors.find((m) => m.id === button.dataset.id);
         toggleMonitor(monitor, button.dataset.enabled !== "1").catch((e) => toast(e.message, true));

@@ -141,7 +141,7 @@ export async function renderHome({ content, signal }) {
           <div><strong>${Number(overview.services?.active || 0)}</strong><span>Active services</span></div>
           <div><strong>${Number(overview.services?.renewals_due || 0)}</strong><span>Renewals due ≤ 7d</span></div>
         </div>
-        <div class="filters" style="margin-top:14px"><a class="button small" data-link href="/console/revenue">Open revenue</a><button class="button small" id="home-billing-portal" type="button">Billing</button></div>
+        <div class="filters mt-14"><a class="button small" data-link href="/console/revenue">Open revenue</a><button class="button small" id="home-billing-portal" type="button">Billing</button></div>
       </div>`, { subtitle: "Commercial state follows verified engineering work; payment evidence is authoritative." })}
     </div>`;
 

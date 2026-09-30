@@ -56,7 +56,7 @@ services:
       dockerfile: Dockerfile.browser
     restart: unless-stopped
     user: pwuser
-    ipc: host
+    shm_size: "1gb"
     environment:
       <<: *worker-env
       WORKER_ID: browser-qa-worker
@@ -73,7 +73,7 @@ services:
     build: *browser-build
     restart: unless-stopped
     user: pwuser
-    ipc: host
+    shm_size: "1gb"
     environment:
       <<: *worker-env
       WORKER_ID: site-discovery-worker
@@ -90,7 +90,7 @@ services:
     build: *browser-build
     restart: unless-stopped
     user: pwuser
-    ipc: host
+    shm_size: "1gb"
     environment:
       <<: *worker-env
       WORKER_ID: journey-qa-worker
@@ -107,7 +107,7 @@ services:
     build: *browser-build
     restart: unless-stopped
     user: pwuser
-    ipc: host
+    shm_size: "1gb"
     environment:
       <<: *worker-env
       WORKER_ID: finding-verification-worker
@@ -148,7 +148,7 @@ services:
     command: node src/workers/integration-service.js
 
   n8n:
-    image: docker.n8n.io/n8nio/n8n:latest
+    image: docker.n8n.io/n8nio/n8n:2.40.7
     restart: unless-stopped
     environment:
       DB_TYPE: postgresdb

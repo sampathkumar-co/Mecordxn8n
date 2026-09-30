@@ -25,11 +25,14 @@ export function subscriptionWriteState(subscription = state.subscription) {
   return { allowed: true, reason: "" };
 }
 
-export function permission(requiredRole, { billingRecovery = false } = {}) {
+export function permission(
+  requiredRole,
+  { billingRecovery = false, operational = false } = {},
+) {
   if (!hasRole(requiredRole)) {
     return { allowed: false, reason: `${requiredRole} role or higher required.` };
   }
-  if (billingRecovery) return { allowed: true, reason: "" };
+  if (billingRecovery || !operational) return { allowed: true, reason: "" };
   return subscriptionWriteState();
 }
 

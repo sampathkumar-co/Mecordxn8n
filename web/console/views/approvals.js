@@ -59,7 +59,7 @@ export async function renderApprovalDetail({ content, signal, route }) {
   const current = data.center?.currentAuthorization || {};
   const capabilities = current.allowed_capabilities || current.allowedCapabilities || [];
   const expired = new Date(approval.expires_at).getTime() <= Date.now() && approval.status === "PENDING";
-  const access = permission("ADMIN");
+  const access = permission("ADMIN", { operational: true });
   const canDecide = approval.status === "PENDING" && !expired && access.allowed;
 
   content.innerHTML = `

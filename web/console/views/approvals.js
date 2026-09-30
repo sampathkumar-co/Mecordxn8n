@@ -83,7 +83,7 @@ export async function renderApprovalDetail({ content, signal, route }) {
           ${detail("Commercial action", approval.commercial_action_id ? compactId(approval.commercial_action_id) : "—")}
           ${detail("Decision by", approval.decided_by || "—")}
         </div>
-        ${approval.decision_note ? `<div class="risk-summary" style="margin-top:10px"><strong>Decision note</strong><div>${escapeHtml(approval.decision_note)}</div></div>` : ""}
+        ${approval.decision_note ? `<div class="risk-summary mt-10"><strong>Decision note</strong><div>${escapeHtml(approval.decision_note)}</div></div>` : ""}
       </div>`)}
       ${panel("Current authorization", `<div class="panel-body">
         <div class="detail-grid">
@@ -91,11 +91,11 @@ export async function renderApprovalDetail({ content, signal, route }) {
           ${detail("Allowed hosts", (current.allowed_hosts || current.allowedHosts || []).join(", ") || "—")}
           ${detail("Expires", current.expires_at ? fmtDate(current.expires_at) : "No expiry")}
         </div>
-        <p class="muted" style="margin:10px 0 0">Approval does not override authorization. The server revalidates current scope again before the gated action executes.</p>
+        <p class="muted my-10">Approval does not override authorization. The server revalidates current scope again before the gated action executes.</p>
       </div>`, { badge: current.mode || "NONE" })}
     </div>
-    ${data.finding ? `<div style="margin-top:10px">${panel("Linked proof", `<div class="panel-body"><strong>${escapeHtml(data.finding.title)}</strong><p class="muted">${escapeHtml(data.finding.affected_url)}</p><div class="filters">${chip(data.finding.severity)}${chip(data.finding.verification_state)}<a class="button small" data-link href="/console/findings/${data.finding.id}">Open evidence</a></div></div>`)}</div>` : ""}
-    <div style="margin-top:10px">${panel("Decision", `<div class="panel-body">
+    ${data.finding ? `<div class="mt-10">${panel("Linked proof", `<div class="panel-body"><strong>${escapeHtml(data.finding.title)}</strong><p class="muted">${escapeHtml(data.finding.affected_url)}</p><div class="filters">${chip(data.finding.severity)}${chip(data.finding.verification_state)}<a class="button small" data-link href="/console/findings/${data.finding.id}">Open evidence</a></div></div>`)}</div>` : ""}
+    <div class="mt-10">${panel("Decision", `<div class="panel-body">
       ${expired ? '<div class="risk-summary"><strong>This request expired.</strong><div>Create a fresh request so authorization and evidence are evaluated again.</div></div>' : ""}
       <div class="filters"><button id="approval-approve" class="button primary" type="button" ${canDecide ? "" : `disabled title="${escapeHtml(access.reason || "Only pending, non-expired requests can be decided.")}"`}>Approve action</button><button id="approval-reject" class="button danger" type="button" ${canDecide ? "" : "disabled"}>Reject action</button></div>
     </div>`)}</div>`;

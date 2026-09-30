@@ -39,13 +39,13 @@ export async function renderRevenue({ content, signal }) {
       ${metric("Active services", overview.services?.active || 0, "Recurring engineering services")}
       ${metric("Renewals due ≤ 7d", overview.services?.renewals_due || 0, "Customer follow-up window")}
     </div>
-    <div id="revenue-board" style="margin-top:10px">
+    <div id="revenue-board" class="mt-10">
       <div class="lifecycle">${stages.map((stage) => {
         const group=items.filter((item)=>item.state===stage);
         return `<section class="lifecycle-col"><div class="lifecycle-head">${stage} · ${group.length}</div>${group.map(opportunityCard).join("") || '<div class="empty">Empty</div>'}</section>`;
       }).join("")}</div>
     </div>
-    <div id="revenue-table" class="hidden" style="margin-top:10px">
+    <div id="revenue-table" class="hidden mt-10">
       ${tablePanel({
         title:"Opportunity list",headers:["State","Opportunity","Target","Score","Value","Actions","Responses","Next action"],
         rows:items.map((item)=>[chip(item.state),`<a data-link class="row-link" href="/console/revenue/${item.id}"><span class="primary-text">${escapeHtml(item.title)}</span></a>`,escapeHtml(item.organization_name),`${fmtNumber(item.opportunity_score)}/100`,escapeHtml(fmtMoney(item.estimated_value_minor,item.currency)),escapeHtml(item.sent_actions),escapeHtml(item.responses),escapeHtml(fmtRelative(item.next_action_at))]),

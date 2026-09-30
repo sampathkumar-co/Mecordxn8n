@@ -21,7 +21,7 @@ export function openTargetForm() {
         <label>Expires at<input name="expiresAt" type="datetime-local"></label>
         <label class="full">Scope notes<textarea name="scopeNotes" rows="3" maxlength="2000"></textarea></label>
         <label class="full">Evidence reference<input name="evidenceReference" maxlength="1000" placeholder="Contract, bounty program, ticket, or other authorization evidence"></label>
-        <label class="full"><span>Capabilities</span><span class="filters"><input name="browser" type="checkbox" style="width:auto"> Browser QA</span><small class="muted">Source remediation unlocks only after DNS ownership verification.</small></label>
+        <label class="full"><span>Capabilities</span><span class="filters"><input name="browser" type="checkbox" class="check-input"> Browser QA</span><small class="muted">Source remediation unlocks only after DNS ownership verification.</small></label>
       </div>
       ${access.allowed ? "" : `<p class="muted">${escapeHtml(access.reason)}</p>`}
       <div class="form-actions"><button class="button" type="button" id="target-cancel">Cancel</button><button class="button primary" type="submit" ${disabledAttrs(access)}>Register target</button></div>
@@ -68,26 +68,26 @@ export async function openAuthorizationCenter(targetId) {
       ${detail("Expires", current?.expires_at ? fmtDate(current.expires_at) : "No expiry")}
       ${detail("Capabilities", (current?.allowed_capabilities || current?.allowedCapabilities || []).join(", ") || "—")}
     </div>
-    <h3 style="margin-top:16px">Ownership verification</h3>
+    <h3 class="mt-16">Ownership verification</h3>
     <p class="muted">DNS proof is required before self-serve client-authorized source access.</p>
     <div class="filters"><button class="button small" id="auth-create-challenge" type="button" ${disabledAttrs(access)}>Create DNS challenge</button>${verified ? chip("VERIFIED") : chip("NOT VERIFIED")}</div>
 
-    <h3 style="margin-top:16px">Replace authorization</h3>
+    <h3 class="mt-16">Replace authorization</h3>
     <form id="auth-upgrade-form">
       <div class="form-grid">
         <label>Mode<select name="mode"><option>PUBLIC_QA_ONLY</option><option>BUG_BOUNTY</option><option>CLIENT_AUTHORIZED</option><option>DO_NOT_TEST</option></select></label>
         <label>Expires at<input name="expiresAt" type="datetime-local"></label>
         <label class="full">Evidence reference<input name="evidenceReference" maxlength="1000" placeholder="Contract, signed scope, program reference"></label>
-        <label><span class="filters"><input name="browser" type="checkbox" style="width:auto" checked> Browser QA</span></label>
-        <label><span class="filters"><input name="remediation" type="checkbox" style="width:auto"> Source remediation</span></label>
+        <label><span class="filters"><input name="browser" type="checkbox" class="check-input" checked> Browser QA</span></label>
+        <label><span class="filters"><input name="remediation" type="checkbox" class="check-input"> Source remediation</span></label>
       </div>
       <div class="form-actions"><button class="button primary" type="submit" ${disabledAttrs(access)}>Replace authorization</button></div>
     </form>
 
-    <h3 style="margin-top:16px">Authorization history</h3>
+    <h3 class="mt-16">Authorization history</h3>
     <div class="timeline">${history.map((item) => `<div class="timeline-item"><strong>${escapeHtml(item.mode || item.event_type || "Authorization")}</strong><p>${escapeHtml(fmtDate(item.created_at || item.createdAt))} · ${escapeHtml(item.revoked_at || item.revokedAt ? "revoked" : "recorded")}</p></div>`).join("") || '<div class="muted">No history yet.</div>'}</div>
 
-    <div class="danger-zone" style="margin-top:16px">
+    <div class="danger-zone mt-16">
       <strong>Danger zone</strong><p class="muted">Revoking authorization cancels queued/running work and clears its leases.</p>
       <button class="button danger small" id="auth-revoke" type="button" ${disabledAttrs(access)}>Revoke active authorization</button>
     </div>`);
@@ -171,8 +171,8 @@ export function openApiKeyForm() {
       <label class="full">Name<input name="name" maxlength="120" required></label>
       <label>Rate limit / hour<input name="rateLimitPerHour" type="number" min="60" max="100000" value="2000"></label>
       <label>Expires at<input name="expiresAt" type="datetime-local"></label>
-      <fieldset class="full" style="border:0;padding:0;margin:0"><legend class="eyebrow">Scopes</legend>
-        ${["workspace:read","targets:write","approvals:write","members:write","integrations:write"].map((scope, index) => `<label style="display:flex;grid-template-columns:auto 1fr;align-items:center;margin:6px 0"><input style="width:auto" name="scope" value="${scope}" type="checkbox" ${index === 0 ? "checked" : ""}>${scope}</label>`).join("")}
+      <fieldset class="full fieldset-reset"><legend class="eyebrow">Scopes</legend>
+        ${["workspace:read","targets:write","approvals:write","members:write","integrations:write"].map((scope, index) => `<label class="check-row"><input class="check-input" name="scope" value="${scope}" type="checkbox" ${index === 0 ? "checked" : ""}>${scope}</label>`).join("")}
       </fieldset>
     </div><div class="form-actions"><button class="button" id="key-cancel" type="button">Cancel</button><button class="button primary" type="submit" ${disabledAttrs(access)}>Create key</button></div></form>`);
   $("#key-cancel").addEventListener("click", closeModal);
@@ -208,8 +208,8 @@ export function openIntegrationForm() {
         <label>Provider<select name="provider" id="integration-provider"><option>GITHUB</option><option>SLACK</option><option>STRIPE</option><option>WEBHOOK</option></select></label>
         <label>Name<input name="name" maxlength="160" placeholder="Production notifications" required></label>
         <div id="integration-config" class="full"></div>
-        <fieldset id="integration-events" class="full" style="border:0;padding:0;margin:0"><legend class="eyebrow">Subscribed events</legend>
-          ${integrationEvents.map((event) => `<label style="display:flex;grid-template-columns:auto 1fr;align-items:center;margin:5px 0"><input style="width:auto" type="checkbox" name="event" value="${event}" ${event === "system.test" ? "" : "checked"}>${event}</label>`).join("")}
+        <fieldset id="integration-events" class="full fieldset-reset"><legend class="eyebrow">Subscribed events</legend>
+          ${integrationEvents.map((event) => `<label class="check-row compact"><input class="check-input" type="checkbox" name="event" value="${event}" ${event === "system.test" ? "" : "checked"}>${event}</label>`).join("")}
         </fieldset>
       </div>
       <p class="muted">Secrets are encrypted at rest and are never rendered again after creation.</p>
@@ -286,9 +286,9 @@ export function openRepairRequest(finding) {
   const access = permission("OPERATOR", { operational: true });
   openModal("Request source repair", "HUMAN APPROVAL REQUIRED", `
     <div class="risk-summary"><strong>This does not start source changes.</strong><div>A human approval request is created first. Current authorization is rechecked again before execution.</div></div>
-    <form id="repair-request-form" style="margin-top:12px">
+    <form id="repair-request-form" class="mt-12">
       <label>Authorized project root<input name="projectRoot" placeholder="C:\\path\\to\\authorized-project" required></label>
-      <label style="margin-top:10px">Approval expiry (minutes)<input name="expiresMinutes" type="number" min="5" max="1440" value="120"></label>
+      <label class="mt-10">Approval expiry (minutes)<input name="expiresMinutes" type="number" min="5" max="1440" value="120"></label>
       <div class="form-actions"><button class="button" id="repair-cancel" type="button">Cancel</button><button class="button primary" type="submit" ${disabledAttrs(access)}>Request approval</button></div>
     </form>`);
   $("#repair-cancel").addEventListener("click", closeModal);

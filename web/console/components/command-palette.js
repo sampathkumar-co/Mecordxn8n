@@ -7,7 +7,8 @@ import { openIntegrationForm, openInviteForm, openTargetForm } from "./actions.j
 
 let items = [];
 let active = 0;
-let loadedWorkspace = "";\nlet returnFocus = null;
+let loadedWorkspace = "";
+let returnFocus = null;
 
 function staticItems() {
   return [

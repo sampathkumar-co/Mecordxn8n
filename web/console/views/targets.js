@@ -9,7 +9,7 @@ export async function renderTargets({ content, signal }) {
   const data = await api(`/v1/platform/workspaces/${state.workspaceId}/targets?limit=200`, { signal, cacheMs: 7000 });
   if (signal.aborted) return;
   const targets = data.targets || [];
-  const addAccess = permission("OPERATOR");
+  const addAccess = permission("OPERATOR", { operational: true });
 
   content.innerHTML = `
     <div class="toolbar">
@@ -74,8 +74,8 @@ export async function renderTargetDetail({ content, signal, route }) {
   const regressions = (data.operations?.regressions || []).filter((item) => item.target_id === id);
   const approvals = (data.approvals?.approvals || []).filter((item) => item.target_id === id);
   const sourceCap = (current.allowed_capabilities || current.allowedCapabilities || []).includes("SOURCE_REMEDIATION");
-  const opsAccess = permission("OPERATOR");
-  const adminAccess = permission("ADMIN");
+  const opsAccess = permission("OPERATOR", { operational: true });
+  const adminAccess = permission("ADMIN", { operational: true });
 
   content.innerHTML = `
     ${partialBanner(errors)}

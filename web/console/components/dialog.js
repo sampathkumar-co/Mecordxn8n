@@ -68,6 +68,12 @@ export async function confirmDecision({
   });
 }
 
+document.querySelectorAll("[data-close-dialog]").forEach((button) => {
+  button.addEventListener("click", () => {
+    document.getElementById(button.dataset.closeDialog)?.close();
+  });
+});
+
 for (const id of ["modal", "drawer"]) {
   const dialog = document.getElementById(id);
   dialog?.addEventListener("close", restore);

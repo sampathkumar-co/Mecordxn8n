@@ -351,7 +351,6 @@ export async function auditBrowserPage(
           proxy: { server: configuredProxy },
           args: [
             "--proxy-bypass-list=<-loopback>",
-            "--disable-dev-shm-usage",
             "--disable-background-networking",
             "--disable-sync",
             "--no-first-run",

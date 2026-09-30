@@ -39,14 +39,14 @@ export async function renderIntegrations({content,signal}){
       </div>`)}
       ${panel("Recovery queue",`<div class="panel-body">${deliveries.filter(d=>["FAILED","DEAD_LETTER"].includes(d.state)).slice(0,6).map(d=>`<div class="action-item urgent"><span class="action-rank">!</span><div><strong>${escapeHtml(d.event_type)}</strong><p>${escapeHtml(d.connection_name)} · ${escapeHtml(d.last_error_code||d.state)}</p></div>${chip(d.state)}</div>`).join("")||'<div class="empty"><strong>No delivery failures</strong>Integration delivery is healthy.</div>'}</div>`)}
     </div>
-    <div style="margin-top:10px">
+    <div class="mt-10">
       ${tablePanel({
         title:"Connections",headers:["Provider","Connection","State","Events","Last success","Last error","Action"],
         rows:integrations.map(i=>[chip(i.provider),`<a data-link class="row-link" href="/console/integrations/${i.id}"><span class="primary-text">${escapeHtml(i.name)}</span></a>`,chip(i.status),escapeHtml((i.subscribedEvents||[]).join(", ")||"Inbound only"),escapeHtml(fmtRelative(i.lastSuccessAt)),escapeHtml(i.lastErrorCode||"—"),`<a data-link class="button small" href="/console/integrations/${i.id}">Manage</a>`]),
         emptyTitle:"No integrations",emptyCopy:"Connect GitHub, Slack, Stripe, or a signed HTTPS webhook.",
       })}
     </div>
-    <div style="margin-top:10px">
+    <div class="mt-10">
       ${tablePanel({
         title:"Recent delivery state",headers:["State","Event","Connection","Attempt","Next retry","Error","Updated"],
         rows:deliveries.map(d=>[chip(d.state),escapeHtml(d.event_type),escapeHtml(d.connection_name),`${d.attempt_count}/${d.max_attempts}`,escapeHtml(fmtRelative(d.next_attempt_at)),escapeHtml(d.last_error_code||"—"),escapeHtml(fmtDate(d.updated_at))]),
@@ -85,7 +85,7 @@ export async function renderIntegrationDetail({content,signal,route}){
       </div>`)}
       ${panel("Public configuration",`<div class="panel-body detail-grid">${publicConfig.map(([k,v])=>detail(k,typeof v==="object"?safeJson(v):String(v))).join("")||detail("Secrets","Configured values are hidden")}</div><div class="panel-body"><p class="muted">Secret values and ciphertext never leave the server.</p></div>`)}
     </div>
-    <div style="margin-top:10px">
+    <div class="mt-10">
       ${tablePanel({
         title:"Delivery history",headers:["State","Event","Attempt","Worker","Next retry","Provider ref","Error","Created"],
         rows:deliveries.map(d=>[chip(d.state),escapeHtml(d.event_type),`${d.attempt_count}/${d.max_attempts}`,escapeHtml(d.lease_owner||"—"),escapeHtml(fmtRelative(d.next_attempt_at)),escapeHtml(d.provider_reference||"—"),escapeHtml(d.last_error_code||"—"),escapeHtml(fmtDate(d.created_at))]),

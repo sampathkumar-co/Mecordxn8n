@@ -7,7 +7,7 @@ import { openIntegrationForm, openInviteForm, openTargetForm } from "./actions.j
 
 let items = [];
 let active = 0;
-let loadedWorkspace = "";
+let loadedWorkspace = "";\nlet returnFocus = null;
 
 function staticItems() {
   return [
@@ -86,10 +86,14 @@ function execute(item) {
 
 export async function openCommandPalette() {
   const palette = $("#command-palette");
+  returnFocus = document.activeElement instanceof HTMLElement
+    ? document.activeElement
+    : null;
   items = staticItems();
   active = 0;
   $("#palette-input").value = "";
   palette.showModal();
+  render();
   $("#palette-input").focus();
   try { await loadDynamic(); render(); } catch (error) { toast(error.message, true); }
 }
@@ -107,4 +111,10 @@ $("#command-palette")?.addEventListener("keydown", (event) => {
     const item = visibleItems()[active];
     if (item) { event.preventDefault(); execute(item); }
   }
+});
+
+$("#command-palette")?.addEventListener("close", () => {
+  const target = returnFocus;
+  returnFocus = null;
+  if (target?.isConnected) target.focus();
 });

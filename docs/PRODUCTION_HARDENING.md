@@ -1,5 +1,12 @@
 # Production Hardening II
 
+**Implementation status: COMPLETE for repository-controlled hardening in 1.0.0-rc.6.**
+
+The release still requires operator-provided production infrastructure, real
+secrets/provider credentials, digest-qualified production image references,
+GitHub repository-admin branch protection/rulesets, and a strict live smoke
+run against the deployed HTTPS environment.
+
 This document records security controls that are part of the V1 production
 boundary and the few controls that must be enabled in external infrastructure.
 
@@ -51,7 +58,27 @@ after successful authentication.
 
 ## Backups and evidence
 
-Database backups must be encrypted and copied off-host. Evidence artifacts are
-content-hashed and worker storage is isolated. Production operators should use
-versioned/immutable object storage for long-term evidence and exercise complete
-restore drills on a schedule.
+Application and n8n databases have encrypted backup/restore verification.
+Worker-generated evidence is uploaded through the Control API into a
+lease-bound, checksum-verified SHA-256 content-addressed store; persisted
+verification evidence rejects mutable worker-local paths. Evidence backup is
+encrypted and release certification decrypts and verifies checksum integrity.
+
+Production operators should additionally copy encrypted backups off-host and
+exercise the strict live restore/smoke procedure on the deployed environment.
+
+## Certification
+
+The rc.6 merge gate requires the same exact head to pass:
+
+- CI, including real Playwright desktop/mobile Control Center certification;
+- Release Gate, including migrations, benchmark, encrypted database/evidence
+  backup verification, SBOM and release invariants;
+- Security, including dependency audit, current/history secret scans, and
+  HIGH/CRITICAL container scans;
+- CodeQL security analysis.
+
+Production preflight also requires privileged MFA, verified email, signed
+authentication-mail delivery, n8n/Mecord dependency health, unique worker
+credentials, split n8n/application database credentials, and digest-qualified
+Node, Playwright, PostgreSQL, n8n and Caddy images.

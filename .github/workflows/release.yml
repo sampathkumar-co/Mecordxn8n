@@ -104,6 +104,12 @@ jobs:
       - name: Restore verification
         run: node scripts/restore-verify.mjs artifacts/database.backup
       - name: Production preflight
+        env:
+          DEPENDENCY_HEALTH_ENABLED: "true"
+          MECORD_MCP_URL: https://mecord.example.test/mcp
+          MECORD_MCP_TOKEN: ${{ env.ORCHESTRATOR_TOKEN }}
+          MECORD_HEALTH_URL: https://mecord.example.test/healthz
+          N8N_HEALTH_URL: http://n8n:5678/healthz
         run: node scripts/production-preflight.mjs
       - name: Release certification
         run: node scripts/release-certify.mjs

@@ -61,12 +61,21 @@ jobs:
           printf '%s' "$PRODUCTION_ENV_B64" | base64 --decode > .deploy/production.env
           chmod 600 .deploy/production.env
 
-          WORKFLOW_PUBLIC_APP_URL="$PUBLIC_APP_URL"             node --env-file=.deploy/production.env -e '
-              if (process.env.PUBLIC_APP_URL !== process.env.WORKFLOW_PUBLIC_APP_URL) {
-                console.error("PUBLIC_APP_URL does not match the protected environment variable");
-                process.exit(1);
-              }
-            '
+          WORKFLOW_PUBLIC_APP_URL="$PUBLIC_APP_URL" \
+            node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          import { parseEnv } from "node:util";
+
+          const fileEnv = parseEnv(
+            fs.readFileSync(".deploy/production.env", "utf8"),
+          );
+          if (fileEnv.PUBLIC_APP_URL !== process.env.WORKFLOW_PUBLIC_APP_URL) {
+            console.error(
+              "PUBLIC_APP_URL does not match the protected environment variable",
+            );
+            process.exit(1);
+          }
+          NODE
 
           node --env-file=.deploy/production.env scripts/production-preflight.mjs
 

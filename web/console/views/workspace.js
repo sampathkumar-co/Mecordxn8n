@@ -3,7 +3,7 @@ import { state, currentWorkspace } from "../core/state.js";
 import { permission, disabledAttrs } from "../core/permissions.js";
 import { escapeHtml, fmtDate, fmtRelative } from "../core/format.js";
 import { chip, detail, entityHeader, metric, panel, partialBanner, setPageMeta, tablePanel, $, $$, toast } from "../components/ui.js";
-import { confirmDecision, openModal } from "../components/dialog.js";
+import { closeModal, confirmDecision, openModal } from "../components/dialog.js";
 import { openApiKeyForm, openBilling, openBillingPortal, openInviteForm, revokeApiKey } from "../components/actions.js";
 
 function workspaceSubnav(active) {
@@ -12,6 +12,112 @@ function workspaceSubnav(active) {
     <a data-link href="/console/workspace/billing" class="${active === "billing" ? "active" : ""}">Billing & usage</a>
     <a data-link href="/console/workspace/audit" class="${active === "audit" ? "active" : ""}">Audit & retention</a>
   </nav>`;
+}
+
+async function openMfaEnrollment() {
+  try {
+    const enrollment = await api("/v1/platform/mfa/enroll", {
+      method: "POST",
+      body: "{}",
+    });
+    openModal("Enable multi-factor authentication", "ACCOUNT SECURITY", `
+      <p class="muted">Add this TOTP secret to your authenticator app, store the recovery codes offline, then enter the current six-digit code.</p>
+      <div class="detail-grid">
+        ${detail("Secret", enrollment.secret)}
+        ${detail("Enrollment expires", `${Math.round(Number(enrollment.expiresInSeconds || 0) / 60)} minutes`)}
+      </div>
+      <h3 class="mt-16">Authenticator URI</h3>
+      <pre class="code-block">${escapeHtml(enrollment.otpauthUri)}</pre>
+      <h3 class="mt-16">One-time recovery codes</h3>
+      <pre class="code-block">${escapeHtml((enrollment.recoveryCodes || []).join("\n"))}</pre>
+      <form id="mfa-confirm-form" class="mt-12">
+        <label>Authenticator code<input id="mfa-confirm-code" autocomplete="one-time-code" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" required></label>
+        <div class="form-actions">
+          <button id="mfa-confirm-cancel" class="button" type="button">Cancel</button>
+          <button class="button primary" type="submit">Confirm MFA</button>
+        </div>
+      </form>`);
+    $("#mfa-confirm-cancel").addEventListener("click", closeModal);
+    $("#mfa-confirm-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button=event.currentTarget.querySelector('button[type="submit"]');
+      button.disabled=true;
+      try {
+        await api("/v1/platform/mfa/confirm", {
+          method: "POST",
+          body: JSON.stringify({ code: $("#mfa-confirm-code").value }),
+        });
+        closeModal();
+        toast("Multi-factor authentication enabled. Other sessions were revoked.");
+        document.dispatchEvent(new CustomEvent("mecord:refresh"));
+      } catch (error) {
+        button.disabled=false;
+        toast(error.message,true);
+      }
+    });
+  } catch (error) {
+    toast(error.message,true);
+  }
+}
+
+function openMfaStepUp() {
+  openModal("Verify multi-factor authentication", "STEP-UP SECURITY", `
+    <p class="muted">Enter a current authenticator code or an unused recovery code to refresh privileged-action verification.</p>
+    <form id="mfa-stepup-form">
+      <label>Authenticator or recovery code<input id="mfa-stepup-code" autocomplete="one-time-code" maxlength="64" required></label>
+      <div class="form-actions">
+        <button id="mfa-stepup-cancel" class="button" type="button">Cancel</button>
+        <button class="button primary" type="submit">Verify</button>
+      </div>
+    </form>`);
+  $("#mfa-stepup-cancel").addEventListener("click", closeModal);
+  $("#mfa-stepup-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const button=event.currentTarget.querySelector('button[type="submit"]');
+    button.disabled=true;
+    try {
+      await api("/v1/platform/mfa/verify", {
+        method:"POST",
+        body:JSON.stringify({ code:$("#mfa-stepup-code").value }),
+      });
+      closeModal();
+      toast("MFA step-up verified.");
+      document.dispatchEvent(new CustomEvent("mecord:refresh"));
+    } catch (error) {
+      button.disabled=false;
+      toast(error.message,true);
+    }
+  });
+}
+
+function openMfaDisable() {
+  openModal("Disable multi-factor authentication", "ACCOUNT SECURITY", `
+    <div class="risk-summary"><strong>This weakens account protection.</strong><div>Enter a current authenticator code or unused recovery code. Other sessions will remain revoked.</div></div>
+    <form id="mfa-disable-form" class="mt-12">
+      <label>Authenticator or recovery code<input id="mfa-disable-code" autocomplete="one-time-code" maxlength="64" required></label>
+      <div class="form-actions">
+        <button id="mfa-disable-cancel" class="button" type="button">Cancel</button>
+        <button class="button danger" type="submit">Disable MFA</button>
+      </div>
+    </form>`);
+  $("#mfa-disable-cancel").addEventListener("click", closeModal);
+  $("#mfa-disable-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const button=event.currentTarget.querySelector('button[type="submit"]');
+    button.disabled=true;
+    try {
+      await api("/v1/platform/mfa/disable", {
+        method:"POST",
+        body:JSON.stringify({ code:$("#mfa-disable-code").value }),
+      });
+      closeModal();
+      toast("Multi-factor authentication disabled.");
+      document.dispatchEvent(new CustomEvent("mecord:refresh"));
+    } catch (error) {
+      button.disabled=false;
+      toast(error.message,true);
+    }
+  });
 }
 
 export async function renderWorkspace({ content, signal, route }) {
@@ -30,6 +136,7 @@ async function renderAccess({ content, signal, wid, workspace, section }) {
     keys: api(`/v1/platform/workspaces/${wid}/api-keys`, { signal, cacheMs: 4000 }),
     invites: api(`/v1/platform/workspaces/${wid}/invites`, { signal, cacheMs: 4000 }),
     sessions: api("/v1/platform/sessions", { signal, cacheMs: 4000 }),
+    mfa: api("/v1/platform/mfa", { signal, cacheMs: 2500 }),
     subscription: api(`/v1/platform/workspaces/${wid}/subscription`, { signal, cacheMs: 6000 }),
   });
   if (signal.aborted) return;
@@ -40,6 +147,12 @@ async function renderAccess({ content, signal, wid, workspace, section }) {
   const invites = data.invites?.invites || [];
   const sessions = data.sessions?.sessions || [];
   const currentSessionId = data.sessions?.currentSessionId;
+  const mfa = data.mfa || {
+    enabled: Boolean(state.me?.principal?.mfa?.enabled),
+    pending: false,
+    recoveryCodesRemaining: 0,
+    sessionVerifiedAt: state.me?.principal?.mfa?.verifiedAt || null,
+  };
   const adminAccess = permission("ADMIN");
   const ownerAccess = permission("OWNER");
 
@@ -53,6 +166,20 @@ async function renderAccess({ content, signal, wid, workspace, section }) {
     <div class="workspace-sections">
       ${workspaceSubnav(section)}
       <div class="stack">
+        ${panel("Account security", `<div class="panel-body">
+          <div class="detail-grid">
+            ${detail("Multi-factor authentication", mfa.enabled ? "ENABLED" : mfa.pending ? "PENDING CONFIRMATION" : "DISABLED")}
+            ${detail("Recovery codes remaining", mfa.enabled ? mfa.recoveryCodesRemaining : "—")}
+            ${detail("Current session MFA", mfa.sessionVerifiedAt ? `VERIFIED · ${fmtRelative(mfa.sessionVerifiedAt)}` : "NOT VERIFIED")}
+            ${detail("Session protection", "HttpOnly + SameSite=Strict + CSRF")}
+          </div>
+          <div class="filters mt-12">
+            ${mfa.enabled
+              ? '<button id="mfa-stepup" class="button small primary" type="button">Verify step-up</button><button id="mfa-disable" class="button danger small" type="button">Disable MFA</button>'
+              : '<button id="mfa-enable" class="button primary small" type="button">Enable MFA</button>'}
+          </div>
+          <p class="muted my-10">MFA uses encrypted TOTP secrets. Recovery codes are hashed and each recovery code can be used only once.</p>
+        </div>`, { badge: mfa.enabled ? "MFA ENABLED" : "MFA OFF" })}
         ${tablePanel({
           title:"Members", headers:["Person","Role","Status","Joined","Control"],
           rows:members.map((item)=>[
@@ -94,6 +221,9 @@ async function renderAccess({ content, signal, wid, workspace, section }) {
 
   $("#workspace-invite")?.addEventListener("click", openInviteForm);
   $("#workspace-key")?.addEventListener("click", openApiKeyForm);
+  $("#mfa-enable")?.addEventListener("click", openMfaEnrollment);
+  $("#mfa-stepup")?.addEventListener("click", openMfaStepUp);
+  $("#mfa-disable")?.addEventListener("click", openMfaDisable);
 
   $$(".member-role").forEach((select) => select.addEventListener("change", async () => {
     const previous = members.find((item)=>item.id===select.dataset.userId)?.role;

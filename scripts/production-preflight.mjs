@@ -93,6 +93,26 @@ if (new Set(controlSecrets).size !== controlSecrets.length) {
   errors.push("orchestrator, trigger and worker credentials must all be distinct");
 }
 
+const integrationKeyVersion = Number(
+  process.env.PLATFORM_MASTER_KEY_ACTIVE_VERSION || 1,
+);
+if (
+  !Number.isInteger(integrationKeyVersion) ||
+  integrationKeyVersion < 1 ||
+  integrationKeyVersion > 9999
+) {
+  errors.push("PLATFORM_MASTER_KEY_ACTIVE_VERSION must be an integer from 1 to 9999");
+} else if (integrationKeyVersion > 1) {
+  const activeKey = String(
+    process.env[`PLATFORM_MASTER_KEY_V${integrationKeyVersion}`] || "",
+  ).trim();
+  if (activeKey.length < 32) {
+    errors.push(
+      `PLATFORM_MASTER_KEY_V${integrationKeyVersion} must be configured and at least 32 characters`,
+    );
+  }
+}
+
 if (values.PUBLIC_APP_URL) {
   let url;
   try { url = new URL(values.PUBLIC_APP_URL); } catch {}

@@ -52,7 +52,7 @@ import {
   setPlatformSessionCookie,
 } from "./session-http.js";
 import { decidePlatformApproval } from "./approvals.js";
-import { assertPrivilegedMfa } from "./mfa-policy.js";
+import { assertPrivilegedMfa, assertVerifiedEmail } from "./mfa-policy.js";
 import { deliverAuthMail } from "./auth-mail.js";
 import {
   approvalBelongsToWorkspace,
@@ -694,6 +694,7 @@ export async function handlePlatformRoute({
       minimumRole: "OPERATOR",
       apiScope: "targets:write",
     });
+    assertVerifiedEmail(principal);
     const body = await readJson(req);
     if (!validId(body.targetId)) throw badRequest("targetId is invalid");
     if (!(await targetBelongsToWorkspace(body.targetId, match[1]))) {

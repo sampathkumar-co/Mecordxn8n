@@ -229,8 +229,20 @@ if (values.PUBLIC_APP_URL) {
   try { url = new URL(values.PUBLIC_APP_URL); } catch {}
   if (!url || url.protocol !== "https:") {
     errors.push("PUBLIC_APP_URL must be an HTTPS URL");
-  } else if (url.hostname !== values.APP_DOMAIN) {
-    errors.push("PUBLIC_APP_URL hostname must equal APP_DOMAIN");
+  } else {
+    if (
+      url.port ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash ||
+      (url.pathname !== "/" && url.pathname !== "")
+    ) {
+      errors.push("PUBLIC_APP_URL must be an origin-only HTTPS URL");
+    }
+    if (url.hostname !== values.APP_DOMAIN) {
+      errors.push("PUBLIC_APP_URL hostname must equal APP_DOMAIN");
+    }
   }
 }
 

@@ -1,32 +1,60 @@
 import { randomUUID } from "node:crypto";
+import { OAuthClientCredentialsTokenProvider } from "./oauth-client-credentials.js";
 
 export class MecordMcpClient {
-  constructor({ endpoint, token, fetchImpl = fetch }) {
+  constructor({ endpoint, token, oauth, fetchImpl = fetch }) {
     if (!endpoint) throw new Error("MECORD_MCP_URL is required");
     this.endpoint = endpoint;
     this.token = token || null;
     this.fetchImpl = fetchImpl;
+    this.tokenProvider = oauth
+      ? new OAuthClientCredentialsTokenProvider({
+          ...oauth,
+          fetchImpl,
+        })
+      : null;
+    if (!this.token && !this.tokenProvider) {
+      throw new Error(
+        "Mecord MCP authentication requires a static token or OAuth client credentials",
+      );
+    }
     this.sessionId = null;
     this.nextId = 1;
   }
 
   async #post(payload, { signal } = {}) {
-    const headers = {
-      "content-type": "application/json",
-      accept: "application/json, text/event-stream",
-    };
-    if (this.token) headers.authorization = `Bearer ${this.token}`;
-    if (this.sessionId) headers["mcp-session-id"] = this.sessionId;
+    const request = async (forceRefresh = false) => {
+      const headers = {
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+      };
+      const accessToken = this.tokenProvider
+        ? await this.tokenProvider.getToken({ forceRefresh, signal })
+        : this.token;
+      if (accessToken) headers.authorization = `Bearer ${accessToken}`;
+      if (this.sessionId) headers["mcp-session-id"] = this.sessionId;
 
-    const response = await this.fetchImpl(this.endpoint, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(payload),
-      signal,
-    });
+      return await this.fetchImpl(this.endpoint, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(payload),
+        signal,
+      });
+    };
+
+    let response = await request(false);
+    if (response.status === 401 && this.tokenProvider) {
+      this.tokenProvider.invalidate();
+      response = await request(true);
+    }
 
     if (!response.ok) {
-      throw new Error(`Mecord MCP returned HTTP ${response.status}`);
+      const error = new Error(
+        `Mecord MCP returned HTTP ${response.status}`,
+      );
+      error.code = "MECORD_MCP_HTTP_ERROR";
+      error.statusCode = response.status;
+      throw error;
     }
 
     const session = response.headers?.get?.("mcp-session-id");

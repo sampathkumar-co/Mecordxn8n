@@ -115,6 +115,21 @@ if (
   }
 }
 
+if (
+  String(process.env.REQUIRE_PRIVILEGED_MFA || "").trim().toLowerCase() !==
+  "true"
+) {
+  errors.push("REQUIRE_PRIVILEGED_MFA must be true in production");
+}
+const mfaStepUpMinutes = Number(process.env.MFA_STEP_UP_MINUTES || 30);
+if (
+  !Number.isInteger(mfaStepUpMinutes) ||
+  mfaStepUpMinutes < 1 ||
+  mfaStepUpMinutes > 240
+) {
+  errors.push("MFA_STEP_UP_MINUTES must be an integer from 1 to 240");
+}
+
 if (values.PUBLIC_APP_URL) {
   let url;
   try { url = new URL(values.PUBLIC_APP_URL); } catch {}

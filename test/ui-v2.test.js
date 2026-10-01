@@ -83,7 +83,7 @@ test("Control Center navigation iterates the full navigation collection", () => 
     /\$\$\("\[data-link\]\[data-area\], \[data-link\]\[data-route-name\]"\)\.forEach/,
   );
   assert.equal(
-    source.includes('$("[data-link][data-area], [data-link][data-route-name]").forEach'),
+    /(^|[^$])\$\("\[data-link\]\[data-area\], \[data-link\]\[data-route-name\]"\)\.forEach/m.test(source),
     false,
   );
 });

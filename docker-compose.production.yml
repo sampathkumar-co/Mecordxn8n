@@ -12,7 +12,7 @@ services:
       - "5678"
 
   caddy:
-    image: caddy:2.10-alpine
+    image: ${CADDY_IMAGE:-caddy:2.10-alpine}
     restart: unless-stopped
     environment:
       APP_DOMAIN: ${APP_DOMAIN}

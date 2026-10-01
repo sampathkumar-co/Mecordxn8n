@@ -137,6 +137,12 @@ const checks = {
   packageLockVersionMatches:
     JSON.parse(fs.readFileSync("package-lock.json", "utf8")).version ===
     JSON.parse(fs.readFileSync("package.json", "utf8")).version,
+  productionImagePinning:
+    composeText.includes("NODE_BASE_IMAGE") &&
+    composeText.includes("PLAYWRIGHT_BASE_IMAGE") &&
+    composeText.includes("POSTGRES_IMAGE") &&
+    composeText.includes("N8N_IMAGE") &&
+    fs.readFileSync("docker-compose.production.yml", "utf8").includes("CADDY_IMAGE"),
   productionTrustZones:
     composeText.includes("n8n-postgres:") &&
     composeText.includes("evidence_store:/evidence") &&

@@ -1,0 +1,130 @@
+name: Deploy Production
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mecordxn8n-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+      DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+      PUBLIC_APP_URL: ${{ vars.PUBLIC_APP_URL }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - name: Validate protected production configuration
+        env:
+          DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          PRODUCTION_ENV_B64: ${{ secrets.PRODUCTION_ENV_B64 }}
+          SMOKE_API_KEY: ${{ secrets.SMOKE_API_KEY }}
+          SMOKE_WORKSPACE_ID: ${{ secrets.SMOKE_WORKSPACE_ID }}
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_PATH PUBLIC_APP_URL; do
+            value="${!name:-}"
+            test -n "$value" || { echo "::error::$name is not configured"; exit 1; }
+          done
+
+          for name in DEPLOY_SSH_PRIVATE_KEY DEPLOY_KNOWN_HOSTS PRODUCTION_ENV_B64 SMOKE_API_KEY SMOKE_WORKSPACE_ID; do
+            value="${!name:-}"
+            test -n "$value" || { echo "::error::$name is not configured"; exit 1; }
+          done
+
+          [[ "$DEPLOY_HOST" =~ ^[A-Za-z0-9.-]+$ ]] || { echo "::error::DEPLOY_HOST is invalid"; exit 1; }
+          [[ "$DEPLOY_USER" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::DEPLOY_USER is invalid"; exit 1; }
+          [[ "$DEPLOY_PATH" =~ ^/[A-Za-z0-9._/-]+$ && "$DEPLOY_PATH" != *".."* ]] || {
+            echo "::error::DEPLOY_PATH must be a safe absolute path"
+            exit 1
+          }
+          [[ "$PUBLIC_APP_URL" =~ ^https:// ]] || { echo "::error::PUBLIC_APP_URL must use HTTPS"; exit 1; }
+
+          mkdir -p .deploy
+          chmod 700 .deploy
+          printf '%s' "$PRODUCTION_ENV_B64" | base64 --decode > .deploy/production.env
+          chmod 600 .deploy/production.env
+
+          WORKFLOW_PUBLIC_APP_URL="$PUBLIC_APP_URL"             node --env-file=.deploy/production.env -e '
+              if (process.env.PUBLIC_APP_URL !== process.env.WORKFLOW_PUBLIC_APP_URL) {
+                console.error("PUBLIC_APP_URL does not match the protected environment variable");
+                process.exit(1);
+              }
+            '
+
+          node --env-file=.deploy/production.env scripts/production-preflight.mjs
+
+      - name: Configure pinned SSH host identity
+        env:
+          DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_SSH_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/id_ed25519" "$HOME/.ssh/known_hosts"
+          ssh-keygen -F "$DEPLOY_HOST" -f "$HOME/.ssh/known_hosts" >/dev/null || {
+            echo "::error::DEPLOY_KNOWN_HOSTS does not contain DEPLOY_HOST"
+            exit 1
+          }
+
+      - name: Package immutable release
+        id: package
+        run: |
+          set -Eeuo pipefail
+          git archive --format=tar.gz --output=.deploy/release.tar.gz "$GITHUB_SHA"
+          archive_sha="$(sha256sum .deploy/release.tar.gz | awk '{print $1}')"
+          echo "archive_sha=$archive_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Upload release over pinned SSH
+        run: |
+          set -Eeuo pipefail
+          scp -o BatchMode=yes -o StrictHostKeyChecking=yes             .deploy/release.tar.gz             .deploy/production.env             scripts/deploy-production-remote.sh             "$DEPLOY_USER@$DEPLOY_HOST:/tmp/"
+
+      - name: Deploy and verify internal readiness
+        env:
+          ARCHIVE_SHA: ${{ steps.package.outputs.archive_sha }}
+        run: |
+          set -Eeuo pipefail
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes             "$DEPLOY_USER@$DEPLOY_HOST"             "chmod 700 /tmp/deploy-production-remote.sh && /tmp/deploy-production-remote.sh /tmp/release.tar.gz /tmp/production.env '$DEPLOY_PATH' '$GITHUB_SHA' '$ARCHIVE_SHA'"
+
+      - name: Strict authenticated HTTPS smoke
+        env:
+          PRODUCTION_SMOKE_STRICT: "true"
+          SMOKE_API_KEY: ${{ secrets.SMOKE_API_KEY }}
+          SMOKE_WORKSPACE_ID: ${{ secrets.SMOKE_WORKSPACE_ID }}
+        run: node scripts/production-smoke.mjs
+
+      - name: Deployment receipt
+        if: success()
+        run: |
+          {
+            echo "## Production deployment"
+            echo
+            echo "- Commit: `$GITHUB_SHA`"
+            echo "- URL: $PUBLIC_APP_URL"
+            echo "- Environment: production"
+            echo "- Strict authenticated smoke: passed"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove temporary secret material
+        if: always()
+        run: |
+          rm -f .deploy/production.env "$HOME/.ssh/id_ed25519" "$HOME/.ssh/known_hosts"

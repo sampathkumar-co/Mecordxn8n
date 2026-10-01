@@ -156,7 +156,7 @@ async function ensureSubscription(signal) {
 }
 
 async function renderRoute(route = parseRoute()) {
-  if (!state.token || !state.me) return;
+  if (!state.me) return;
   if (route.name === "not-found") {
     navigate("/console/home", { replace:true });
     return;

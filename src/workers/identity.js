@@ -107,6 +107,16 @@ export function workerPathAllowed(principal, pathname) {
   if (pathname.startsWith("/v1/worker/integrations/")) return false;
 
   if (genericJobPath(pathname)) return true;
+  if (
+    /^\/v1\/worker\/evidence\/[0-9a-f-]+$/i.test(pathname)
+  ) {
+    return [
+      "PUBLIC_QA",
+      "JOURNEY",
+      "VERIFICATION",
+      "SITE_DISCOVERY",
+    ].includes(principal.routeGroup);
+  }
 
   if (
     pathname.match(/^\/v1\/worker\/milestone-a\/findings\/[0-9a-f-]+$/i)

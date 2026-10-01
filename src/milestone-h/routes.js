@@ -31,6 +31,7 @@ import {
 } from "./billing.js";
 import { verifyDnsTxtOwnership } from "./domain.js";
 import { setPlatformSessionCookie } from "../platform/session-http.js";
+import { getDependencyHealth } from "../platform/dependencies.js";
 import { deliverAuthMail } from "../platform/auth-mail.js";
 import {
   completeBillingCheckout,
@@ -648,7 +649,16 @@ export async function handleMilestoneHPlatformRoute({
       minimumRole: "VIEWER",
       apiScope: "workspace:read",
     });
-    return json(res, 200, await getWorkspaceLaunchHealth(match[1]));
+    const health = await getWorkspaceLaunchHealth(match[1]);
+    const dependencyHealth = await getDependencyHealth();
+    if (dependencyHealth.enabled && dependencyHealth.status !== "HEALTHY") {
+      health.status = "ATTENTION";
+      health.issues = [...new Set([...(health.issues || []), "DEPENDENCY_HEALTH"])];
+    }
+    return json(res, 200, {
+      ...health,
+      dependencies: dependencyHealth,
+    });
   }
 
   match = url.pathname.match(

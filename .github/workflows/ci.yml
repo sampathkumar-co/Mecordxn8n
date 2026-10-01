@@ -32,6 +32,7 @@ jobs:
     env:
       DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/mecordxn8n_test
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      PLATFORM_AUTH_KEY: ci-platform-auth-key-with-at-least-32-characters
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

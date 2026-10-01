@@ -122,7 +122,7 @@ jobs:
           MECORD_MCP_TOKEN: ${{ env.ORCHESTRATOR_TOKEN }}
           MECORD_HEALTH_URL: https://mecord.example.test/healthz
           N8N_HEALTH_URL: http://n8n:5678/healthz
-        run: NODE_BASE_IMAGE=node:22-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa PLAYWRIGHT_BASE_IMAGE=mcr.microsoft.com/playwright:v1.63.0-noble@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa POSTGRES_IMAGE=postgres:17-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa N8N_IMAGE=docker.n8n.io/n8nio/n8n:2.40.7@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa CADDY_IMAGE=caddy:2.10-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa REQUIRE_PRIVILEGED_MFA=true REQUIRE_VERIFIED_EMAIL=true MFA_STEP_UP_MINUTES=30 node scripts/production-preflight.mjs
+        run: INGRESS_MODE=external CONTROL_API_HOST_PORT=18080 N8N_HOST_PORT=15678 NODE_BASE_IMAGE=node:22-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa PLAYWRIGHT_BASE_IMAGE=mcr.microsoft.com/playwright:v1.63.0-noble@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa POSTGRES_IMAGE=postgres:17-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa N8N_IMAGE=docker.n8n.io/n8nio/n8n:2.40.7@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa CADDY_IMAGE=caddy:2.10-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa REQUIRE_PRIVILEGED_MFA=true REQUIRE_VERIFIED_EMAIL=true MFA_STEP_UP_MINUTES=30 node scripts/production-preflight.mjs
       - name: Release certification
         run: node scripts/release-certify.mjs
       - name: Validate Caddy ingress

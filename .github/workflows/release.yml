@@ -42,6 +42,7 @@ jobs:
       N8N_POSTGRES_DB: n8n_release
       N8N_POSTGRES_USER: n8n_release
       N8N_POSTGRES_PASSWORD: release-gate-n8n-postgres-password-unique-32chars
+      N8N_DATABASE_URL: postgres://n8n_release:release-gate-n8n-postgres-password-unique-32chars@127.0.0.1:5432/n8n_release
       ORCHESTRATOR_TOKEN: release-gate-orchestrator-token-with-32-characters
       WORKER_TOKEN_HTTP_OBSERVER: release-http-observer-worker-token-00000001
       WORKER_TOKEN_BROWSER_QA: release-browser-qa-worker-token-00000000002

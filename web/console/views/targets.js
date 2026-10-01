@@ -78,6 +78,14 @@ export async function renderTargetDetail({ content, signal, route }) {
   const sourceCap = (current.allowed_capabilities || current.allowedCapabilities || []).includes("SOURCE_REMEDIATION");
   const opsAccess = permission("OPERATOR", { operational: true });
   const adminAccess = permission("ADMIN", { operational: true });
+  const executionAccess = !opsAccess.allowed
+    ? opsAccess
+    : (verified || current.mode === "BUG_BOUNTY")
+      ? { allowed: true, reason: "" }
+      : {
+          allowed: false,
+          reason: "Verify domain ownership before running QA on this target.",
+        };
 
   content.innerHTML = `
     ${partialBanner(errors)}
@@ -86,7 +94,7 @@ export async function renderTargetDetail({ content, signal, route }) {
       title: target.organizationName,
       subtitle: target.baseUrl,
       badges: [target.authorizationMode || "NO AUTHORIZATION", verified ? "OWNERSHIP VERIFIED" : "OWNERSHIP NOT VERIFIED", sourceCap ? "SOURCE REPAIR ENABLED" : "SOURCE REPAIR OFF"],
-      actions: `<button id="target-assess" class="button primary small" type="button" ${disabledAttrs(opsAccess)}>Run assessment</button><button id="target-monitor" class="button small" type="button" ${disabledAttrs(opsAccess)}>Add monitor</button><button id="target-auth" class="button small" type="button" ${disabledAttrs(adminAccess)}>Authorization</button>`,
+      actions: `<button id="target-assess" class="button primary small" type="button" ${disabledAttrs(executionAccess)}>Run assessment</button><button id="target-monitor" class="button small" type="button" ${disabledAttrs(executionAccess)}>Add monitor</button><button id="target-auth" class="button small" type="button" ${disabledAttrs(adminAccess)}>Authorization</button>`,
     })}
     ${tabs([
       { id: "overview", label: "Overview" },

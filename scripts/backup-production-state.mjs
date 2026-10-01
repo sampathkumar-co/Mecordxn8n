@@ -45,13 +45,44 @@ async function runBackup(name, databaseUrl) {
 const app = await runBackup("mecordxn8n", appUrl);
 const n8n = await runBackup("n8n", n8nUrl);
 
+await new Promise((resolve, reject) => {
+  const child = spawn(
+    process.execPath,
+    [
+      "scripts/backup-evidence.mjs",
+      process.env.EVIDENCE_STORE_DIR || "/evidence",
+      path.join(outputDir, "evidence"),
+    ],
+    {
+      stdio: "inherit",
+      env: {
+        ...process.env,
+        BACKUP_ENCRYPTION_KEY: key,
+      },
+    },
+  );
+  child.on("error", reject);
+  child.on("exit", (code) =>
+    code === 0
+      ? resolve()
+      : reject(new Error("evidence backup failed with exit " + code)),
+  );
+});
+
+const evidenceManifest = JSON.parse(
+  fs.readFileSync(path.join(outputDir, "evidence", "manifest.json"), "utf8"),
+);
+
 const manifest = {
   kind: "PRODUCTION_STATE",
   encrypted: true,
   applicationDatabase: app,
   n8nDatabase: n8n,
-  artifacts:
-    "Evidence/object storage must be backed up separately using the storage provider's versioned immutable backup policy.",
+  evidence: {
+    manifest: "evidence/manifest.json",
+    artifactCount: evidenceManifest.artifactCount,
+    encrypted: true,
+  },
   createdAt: new Date().toISOString(),
 };
 

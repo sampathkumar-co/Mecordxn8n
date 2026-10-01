@@ -52,6 +52,14 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       DB_POOL_MAX: ${DB_POOL_MAX:-10}
       ORCHESTRATOR_TOKEN: ${ORCHESTRATOR_TOKEN}
+      WORKER_TRIGGER_TOKEN: ${WORKER_TRIGGER_TOKEN}
+      MECORDXN8N_HTTP_OBSERVER_URL: http://http-observer:8090
+      MECORDXN8N_BROWSER_QA_URL: http://browser-qa:8091
+      MECORDXN8N_SITE_DISCOVERY_URL: http://site-discovery:8092
+      MECORDXN8N_JOURNEY_QA_URL: http://journey-qa:8093
+      MECORDXN8N_VERIFICATION_URL: http://finding-verification:8094
+      MECORDXN8N_REMEDIATION_URL: http://remediation:8095
+      MECORDXN8N_INTEGRATION_URL: http://integration-delivery:8096
       WORKER_TOKEN_HTTP_OBSERVER: ${WORKER_TOKEN_HTTP_OBSERVER}
       WORKER_TOKEN_BROWSER_QA: ${WORKER_TOKEN_BROWSER_QA}
       WORKER_TOKEN_SITE_DISCOVERY: ${WORKER_TOKEN_SITE_DISCOVERY}
@@ -76,6 +84,7 @@ services:
     networks:
       - edge
       - app-db
+      - orchestrator-net
       - http-observer-net
       - browser-qa-net
       - site-discovery-net
@@ -269,14 +278,6 @@ services:
       N8N_RUNNERS_ENABLED: "true"
       MECORDXN8N_CONTROL_API_URL: http://control-api:8080
       MECORDXN8N_ORCHESTRATOR_TOKEN: ${ORCHESTRATOR_TOKEN}
-      MECORDXN8N_HTTP_OBSERVER_URL: http://http-observer:8090
-      MECORDXN8N_BROWSER_QA_URL: http://browser-qa:8091
-      MECORDXN8N_SITE_DISCOVERY_URL: http://site-discovery:8092
-      MECORDXN8N_JOURNEY_QA_URL: http://journey-qa:8093
-      MECORDXN8N_VERIFICATION_URL: http://finding-verification:8094
-      MECORDXN8N_REMEDIATION_URL: http://remediation:8095
-      MECORDXN8N_INTEGRATION_URL: http://integration-delivery:8096
-      MECORDXN8N_WORKER_TRIGGER_TOKEN: ${WORKER_TRIGGER_TOKEN}
     depends_on:
       n8n-postgres:
         condition: service_healthy
@@ -288,13 +289,7 @@ services:
       - n8n_data:/home/node/.n8n
     networks:
       - n8n-db
-      - http-observer-net
-      - browser-qa-net
-      - site-discovery-net
-      - journey-qa-net
-      - verification-net
-      - remediation-net
-      - integration-net
+      - orchestrator-net
 
 volumes:
   postgres_data:
@@ -310,6 +305,8 @@ networks:
   app-db:
     internal: true
   n8n-db:
+    internal: true
+  orchestrator-net:
     internal: true
   http-observer-net:
   browser-qa-net:

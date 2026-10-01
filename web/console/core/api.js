@@ -77,8 +77,15 @@ export async function api(path, options = {}) {
       ? null
       : await response.json().catch(() => ({ error: "INVALID_RESPONSE" }));
 
-    if (response.status === 401 && !path.includes("/auth/login") && !path.includes("/auth/signup")) {
-      document.dispatchEvent(new CustomEvent("mecord:auth-expired"));
+    if (
+      response.status === 401 &&
+      !path.includes("/auth/login") &&
+      !path.includes("/auth/signup") &&
+      !path.includes("/auth/logout")
+    ) {
+      if (state.token || state.csrfToken || state.me) {
+        document.dispatchEvent(new CustomEvent("mecord:auth-expired"));
+      }
       const expired = new Error("Your session has expired.");
       expired.status = 401;
       throw expired;

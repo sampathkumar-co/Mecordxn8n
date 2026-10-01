@@ -479,7 +479,7 @@ export async function handlePlatformRoute({
       sessionId: principal.id,
       code: boundedString(body.code, 64, "code", badRequest, { required: true }),
     });
-    if (!verified) return json(res, 401, { error: "MFA_CODE_INVALID" });
+    if (!verified) return json(res, 400, { error: "MFA_CODE_INVALID" });
     return json(res, 200, { verified: true });
   }
 
@@ -493,7 +493,7 @@ export async function handlePlatformRoute({
       sessionId: principal.id,
       code: boundedString(body.code, 64, "code", badRequest, { required: true }),
     });
-    if (!disabled) return json(res, 401, { error: "MFA_CODE_INVALID" });
+    if (!disabled) return json(res, 400, { error: "MFA_CODE_INVALID" });
     return json(res, 200, { enabled: false });
   }
 

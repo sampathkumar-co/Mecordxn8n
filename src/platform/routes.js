@@ -24,15 +24,20 @@ import {
 import {
   acceptWorkspaceInvite,
   accessAllows,
+  beginPlatformMfaEnrollment,
   bootstrapPlatformOwner,
+  confirmPlatformMfaEnrollment,
   consumePlatformRateLimit,
   createWorkspaceInvite,
+  disablePlatformMfa,
+  getPlatformMfaStatus,
   getWorkspaceAccess,
   loginPlatformUser,
   listPlatformUserSessions,
   listWorkspaceInvites,
   revokePlatformSession,
   revokePlatformUserSession,
+  verifyPlatformMfaStepUp,
 } from "./auth.js";
 import {
   consumePublicRateLimit,
@@ -329,9 +334,16 @@ export async function handlePlatformPublicRoute({
     const result = await loginPlatformUser({
       email: body.email,
       password: body.password,
+      mfaCode: body.mfaCode || null,
       userAgent: req.headers["user-agent"] || "",
     });
     if (!result) return json(res, 401, { error: "INVALID_CREDENTIALS" });
+    if (result.mfaRequired) {
+      return json(res, 202, {
+        mfaRequired: true,
+        user: result.user,
+      });
+    }
     setPlatformSessionCookie(res, result.token, result.expiresAt);
     return json(res, 200, browserSessionResponse(req, result));
   }
@@ -389,6 +401,13 @@ export async function handlePlatformRoute({
       principal: {
         kind: principal.kind,
         user: principal.user || null,
+        mfa:
+          principal.kind === "SESSION"
+            ? {
+                enabled: Boolean(principal.mfaEnabled),
+                verifiedAt: principal.mfaVerifiedAt || null,
+              }
+            : null,
       },
       workspaces,
     });
@@ -410,6 +429,72 @@ export async function handlePlatformRoute({
       sessions: await listPlatformUserSessions(principal.userId),
       currentSessionId: principal.id,
     });
+  }
+
+  if (url.pathname === "/v1/platform/mfa") {
+    if (principal.kind !== "SESSION") {
+      return json(res, 403, { error: "SESSION_REQUIRED" });
+    }
+    if (req.method === "GET") {
+      const status = await getPlatformMfaStatus(principal.userId);
+      return json(res, 200, {
+        ...status,
+        sessionVerifiedAt: principal.mfaVerifiedAt || null,
+      });
+    }
+  }
+
+  if (req.method === "POST" && url.pathname === "/v1/platform/mfa/enroll") {
+    if (principal.kind !== "SESSION") {
+      return json(res, 403, { error: "SESSION_REQUIRED" });
+    }
+    const enrollment = await beginPlatformMfaEnrollment({
+      userId: principal.userId,
+      email: principal.user?.email || "",
+    });
+    return json(res, 201, enrollment);
+  }
+
+  if (req.method === "POST" && url.pathname === "/v1/platform/mfa/confirm") {
+    if (principal.kind !== "SESSION") {
+      return json(res, 403, { error: "SESSION_REQUIRED" });
+    }
+    const body = await readJson(req);
+    const confirmed = await confirmPlatformMfaEnrollment({
+      userId: principal.userId,
+      sessionId: principal.id,
+      code: boundedString(body.code, 64, "code", badRequest, { required: true }),
+    });
+    if (!confirmed) return json(res, 400, { error: "MFA_CODE_INVALID" });
+    return json(res, 200, { enabled: true });
+  }
+
+  if (req.method === "POST" && url.pathname === "/v1/platform/mfa/verify") {
+    if (principal.kind !== "SESSION") {
+      return json(res, 403, { error: "SESSION_REQUIRED" });
+    }
+    const body = await readJson(req);
+    const verified = await verifyPlatformMfaStepUp({
+      userId: principal.userId,
+      sessionId: principal.id,
+      code: boundedString(body.code, 64, "code", badRequest, { required: true }),
+    });
+    if (!verified) return json(res, 401, { error: "MFA_CODE_INVALID" });
+    return json(res, 200, { verified: true });
+  }
+
+  if (req.method === "POST" && url.pathname === "/v1/platform/mfa/disable") {
+    if (principal.kind !== "SESSION") {
+      return json(res, 403, { error: "SESSION_REQUIRED" });
+    }
+    const body = await readJson(req);
+    const disabled = await disablePlatformMfa({
+      userId: principal.userId,
+      sessionId: principal.id,
+      code: boundedString(body.code, 64, "code", badRequest, { required: true }),
+    });
+    if (!disabled) return json(res, 401, { error: "MFA_CODE_INVALID" });
+    return json(res, 200, { enabled: false });
   }
 
   let sessionMatch = url.pathname.match(

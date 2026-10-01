@@ -318,6 +318,7 @@ export function createServer({
       if (url.pathname.startsWith("/console")) {
         const served = await serveConsoleAsset(req, res, url);
         if (served) return;
+        return json(res, 404, { error: "CONSOLE_ASSET_NOT_FOUND" });
       }
 
       if (url.pathname.startsWith("/v1/integrations/webhooks/")) {

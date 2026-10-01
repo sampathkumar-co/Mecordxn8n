@@ -12,6 +12,24 @@ const requiredFiles = [
   "src/workers/integration-service.js",
   "web/console/index.html",
   "web/console/app.js",
+  "web/console/core/api.js",
+  "web/console/core/router.js",
+  "web/console/core/permissions.js",
+  "web/console/components/actions.js",
+  "web/console/components/command-palette.js",
+  "web/console/views/home.js",
+  "web/console/views/targets.js",
+  "web/console/views/findings.js",
+  "web/console/views/approvals.js",
+  "web/console/views/repairs.js",
+  "web/console/views/runs.js",
+  "web/console/views/revenue.js",
+  "web/console/views/integrations.js",
+  "web/console/views/workspace.js",
+  "web/console/styles/tokens.css",
+  "web/console/styles/layout.css",
+  "web/console/styles/components.css",
+  "web/console/styles/views.css",
   "scripts/backup-database.mjs",
   "scripts/restore-verify.mjs",
   ".github/workflows/security.yml",
@@ -64,6 +82,27 @@ function hasNonRootUser(file) {
 }
 
 const caddyfile = fs.readFileSync("deploy/Caddyfile", "utf8");
+
+function consoleSources(dir = "web/console") {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const full = dir + "/" + entry.name;
+    if (entry.isDirectory()) return consoleSources(full);
+    if (
+      entry.isFile() &&
+      (entry.name.endsWith(".html") || entry.name.endsWith(".js"))
+    ) {
+      return [full];
+    }
+    return [];
+  });
+}
+
+const uiSources = consoleSources();
+const consoleHasInlineStyles = uiSources.some((file) =>
+  fs.readFileSync(file, "utf8").includes('style="'),
+);
+const consoleIndex = fs.readFileSync("web/console/index.html", "utf8");
+
 const checks = {
   requiredFiles: missingFiles.length === 0,
   inactiveN8nImports: activeWorkflows.length === 0,
@@ -72,6 +111,16 @@ const checks = {
   controlImageNonRoot: hasNonRootUser("Dockerfile"),
   browserImageNonRoot: hasNonRootUser("Dockerfile.browser"),
   ingressContentSecurityPolicy: /Content-Security-Policy/i.test(caddyfile),
+  controlCenterV2Only: !fs.existsSync("web/console/styles.css"),
+  controlCenterCspCompatible:
+    !consoleHasInlineStyles &&
+    !/<form[^>]+method=["']dialog["']/i.test(consoleIndex),
+  controlCenterDeepLinks:
+    /History API deep links/i.test(fs.readFileSync("docs/UI_UX_V2_PLAN.md", "utf8")) ||
+    /History API routing/i.test(fs.readFileSync("docs/UI_UX_V2_PLAN.md", "utf8")),
+  packageLockVersionMatches:
+    JSON.parse(fs.readFileSync("package-lock.json", "utf8")).version ===
+    JSON.parse(fs.readFileSync("package.json", "utf8")).version,
   productionVersion: JSON.parse(fs.readFileSync("package.json", "utf8")).version,
 };
 

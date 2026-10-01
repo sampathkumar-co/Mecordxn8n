@@ -660,6 +660,37 @@ export async function enqueueDueRenewalIntegrationEvents(limit = 100) {
   return queued;
 }
 
+export async function listIntegrationDeliveries({
+  workspaceId,
+  state = null,
+  limit = 100,
+}) {
+  const safeLimit = Math.min(Math.max(Math.trunc(Number(limit) || 100), 1), 500);
+  const result = await pool.query(
+    `SELECT o.id, o.connection_id, c.provider, c.name AS connection_name,
+            o.event_type, o.state, o.attempt_count, o.max_attempts,
+            o.next_attempt_at, o.lease_owner, o.lease_expires_at,
+            o.last_error_code, o.provider_reference, o.created_at,
+            o.sent_at, o.updated_at
+       FROM integration_outbox o
+       JOIN integration_connections c ON c.id = o.connection_id
+      WHERE o.workspace_id = $1
+        AND ($2::text IS NULL OR o.state = $2)
+      ORDER BY
+        CASE o.state
+          WHEN 'DEAD_LETTER' THEN 0
+          WHEN 'FAILED' THEN 1
+          WHEN 'RUNNING' THEN 2
+          WHEN 'PENDING' THEN 3
+          ELSE 4
+        END,
+        o.updated_at DESC
+      LIMIT $3`,
+    [workspaceId, state || null, safeLimit],
+  );
+  return result.rows;
+}
+
 export async function getIntegrationMetrics(workspaceId) {
   const [connections, deliveries] = await Promise.all([
     pool.query(

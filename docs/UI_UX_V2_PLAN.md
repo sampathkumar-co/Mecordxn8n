@@ -1,5 +1,8 @@
 # Mecordxn8n Control Center — UI/UX V2 Plan
 
+> **Implementation status: COMPLETE for rc.5.** Phases U0–U6 are implemented in the canonical `web/console` frontend. The V2 uses browser-native ES modules, History API deep links, the five-area lifecycle information architecture, evidence-first entity screens, permission-aware controls, responsive navigation, command palette, safe failure states, and automated static/API regression coverage. Production deployment smoke remains environment-specific.
+
+
 ## Objective
 
 Turn the current functional Control Center into a professional, compact, evidence-first product UI that feels purpose-built for engineering and operations—not like an admin template and not like an AI-generated dashboard.

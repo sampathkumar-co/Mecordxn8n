@@ -22,8 +22,15 @@ Configure these as GitHub **environment variables**:
 - `DEPLOY_PATH` — absolute application root, for example
   `/home/deploy/mecordxn8n`.
 - `PUBLIC_APP_URL` — canonical HTTPS URL of the customer application.
+- `DEPLOY_INGRESS_MODE` — `external` for an existing host reverse proxy or
+  `standalone` for the bundled Caddy container.
+- `CONTROL_API_HOST_PORT` — loopback-only host port for the Control API. Use a
+  non-conflicting high port on shared servers, for example `18080`.
+- `N8N_HOST_PORT` — loopback-only host port for n8n, for example `15678`.
 
-The workflow validates host/user/path syntax before making an SSH connection.
+The workflow validates host/user/path/ingress syntax before making an SSH
+connection, and verifies these protected values exactly match the encrypted
+production dotenv.
 
 ### Environment secrets
 
@@ -72,6 +79,48 @@ $bytes = [IO.File]::ReadAllBytes(".env.production")
 
 Delete temporary plaintext production dotenv copies when they are no longer
 needed.
+
+## Ingress modes
+
+### External host Caddy
+
+Use `DEPLOY_INGRESS_MODE=external` when the server already owns ports 80/443
+with a host-level Caddy or another reverse proxy. This is the required mode on
+a shared VPS such as the currently discovered host.
+
+In this mode:
+
+- the bundled Caddy service is behind the `standalone-ingress` Compose profile
+  and is not started;
+- the Control API is published only to
+  `127.0.0.1:$CONTROL_API_HOST_PORT`;
+- n8n is published only to `127.0.0.1:$N8N_HOST_PORT`;
+- the remote deploy script verifies the Control API's published address is
+  loopback-only;
+- `scripts/render-host-caddy.mjs` generates a release-specific Caddy snippet
+  with the exact public route allowlist and security headers;
+- that generated snippet is copied into the immutable release directory as
+  `host-caddy.caddy`.
+
+Generate the host snippet locally with:
+
+```bash
+PUBLIC_APP_URL=https://app.example.com \
+CONTROL_API_HOST_PORT=18080 \
+node scripts/render-host-caddy.mjs
+```
+
+The existing host Caddy must include the generated snippet (or an equivalent
+configuration) and reload successfully before the strict external smoke can
+pass. The deployment workflow deliberately does not overwrite a shared host
+Caddy configuration automatically.
+
+### Standalone Caddy
+
+Use `DEPLOY_INGRESS_MODE=standalone` only on a server where ports 80 and 443
+are free for Mecordxn8n. The remote deploy script activates the
+`standalone-ingress` profile, which starts the bundled Caddy container from
+`docker-compose.production.yml`.
 
 ## Host identity
 

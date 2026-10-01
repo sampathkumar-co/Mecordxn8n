@@ -20,6 +20,9 @@ jobs:
       DEPLOY_USER: ${{ vars.DEPLOY_USER }}
       DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
       PUBLIC_APP_URL: ${{ vars.PUBLIC_APP_URL }}
+      DEPLOY_INGRESS_MODE: ${{ vars.DEPLOY_INGRESS_MODE }}
+      CONTROL_API_HOST_PORT: ${{ vars.CONTROL_API_HOST_PORT }}
+      N8N_HOST_PORT: ${{ vars.N8N_HOST_PORT }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -38,7 +41,7 @@ jobs:
           set -Eeuo pipefail
           test "$GITHUB_REF" = "refs/heads/main"
 
-          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_PATH PUBLIC_APP_URL; do
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_PATH PUBLIC_APP_URL DEPLOY_INGRESS_MODE CONTROL_API_HOST_PORT N8N_HOST_PORT; do
             value="${!name:-}"
             test -n "$value" || { echo "::error::$name is not configured"; exit 1; }
           done
@@ -55,6 +58,12 @@ jobs:
             exit 1
           }
           [[ "$PUBLIC_APP_URL" =~ ^https:// ]] || { echo "::error::PUBLIC_APP_URL must use HTTPS"; exit 1; }
+          [[ "$DEPLOY_INGRESS_MODE" == "external" || "$DEPLOY_INGRESS_MODE" == "standalone" ]] || {
+            echo "::error::DEPLOY_INGRESS_MODE must be external or standalone"
+            exit 1
+          }
+          [[ "$CONTROL_API_HOST_PORT" =~ ^[0-9]+$ ]] || { echo "::error::CONTROL_API_HOST_PORT must be numeric"; exit 1; }
+          [[ "$N8N_HOST_PORT" =~ ^[0-9]+$ ]] || { echo "::error::N8N_HOST_PORT must be numeric"; exit 1; }
 
           mkdir -p .deploy
           chmod 700 .deploy
@@ -62,6 +71,9 @@ jobs:
           chmod 600 .deploy/production.env
 
           WORKFLOW_PUBLIC_APP_URL="$PUBLIC_APP_URL" \
+          WORKFLOW_INGRESS_MODE="$DEPLOY_INGRESS_MODE" \
+          WORKFLOW_CONTROL_API_HOST_PORT="$CONTROL_API_HOST_PORT" \
+          WORKFLOW_N8N_HOST_PORT="$N8N_HOST_PORT" \
             node --input-type=module <<'NODE'
           import fs from "node:fs";
           import { parseEnv } from "node:util";
@@ -69,15 +81,27 @@ jobs:
           const fileEnv = parseEnv(
             fs.readFileSync(".deploy/production.env", "utf8"),
           );
-          if (fileEnv.PUBLIC_APP_URL !== process.env.WORKFLOW_PUBLIC_APP_URL) {
-            console.error(
-              "PUBLIC_APP_URL does not match the protected environment variable",
-            );
-            process.exit(1);
+          const expected = {
+            PUBLIC_APP_URL: process.env.WORKFLOW_PUBLIC_APP_URL,
+            INGRESS_MODE: process.env.WORKFLOW_INGRESS_MODE,
+            CONTROL_API_HOST_PORT: process.env.WORKFLOW_CONTROL_API_HOST_PORT,
+            N8N_HOST_PORT: process.env.WORKFLOW_N8N_HOST_PORT,
+          };
+          for (const [name, value] of Object.entries(expected)) {
+            if (fileEnv[name] !== value) {
+              console.error(
+                name + " does not match the protected environment variable",
+              );
+              process.exit(1);
+            }
           }
           NODE
 
           node --env-file=.deploy/production.env scripts/production-preflight.mjs
+
+          PUBLIC_APP_URL="$PUBLIC_APP_URL" \
+          CONTROL_API_HOST_PORT="$CONTROL_API_HOST_PORT" \
+            node scripts/render-host-caddy.mjs > .deploy/host-caddy.caddy
 
       - name: Configure pinned SSH host identity
         env:
@@ -105,14 +129,14 @@ jobs:
       - name: Upload release over pinned SSH
         run: |
           set -Eeuo pipefail
-          scp -o BatchMode=yes -o StrictHostKeyChecking=yes             .deploy/release.tar.gz             .deploy/production.env             scripts/deploy-production-remote.sh             "$DEPLOY_USER@$DEPLOY_HOST:/tmp/"
+          scp -o BatchMode=yes -o StrictHostKeyChecking=yes             .deploy/release.tar.gz             .deploy/production.env             .deploy/host-caddy.caddy             scripts/deploy-production-remote.sh             "$DEPLOY_USER@$DEPLOY_HOST:/tmp/"
 
       - name: Deploy and verify internal readiness
         env:
           ARCHIVE_SHA: ${{ steps.package.outputs.archive_sha }}
         run: |
           set -Eeuo pipefail
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes             "$DEPLOY_USER@$DEPLOY_HOST"             "chmod 700 /tmp/deploy-production-remote.sh && /tmp/deploy-production-remote.sh /tmp/release.tar.gz /tmp/production.env '$DEPLOY_PATH' '$GITHUB_SHA' '$ARCHIVE_SHA'"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes             "$DEPLOY_USER@$DEPLOY_HOST"             "chmod 700 /tmp/deploy-production-remote.sh && /tmp/deploy-production-remote.sh /tmp/release.tar.gz /tmp/production.env '$DEPLOY_PATH' '$GITHUB_SHA' '$ARCHIVE_SHA' '$DEPLOY_INGRESS_MODE' /tmp/host-caddy.caddy"
 
       - name: Strict authenticated HTTPS smoke
         env:

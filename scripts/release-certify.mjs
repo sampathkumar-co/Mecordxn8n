@@ -52,6 +52,8 @@ const requiredFiles = [
   ".github/workflows/release.yml",
   ".github/workflows/deploy-production.yml",
   "scripts/deploy-production-remote.sh",
+  "scripts/render-host-caddy.mjs",
+  "test/host-caddy.test.js",
   "docs/PRODUCTION_DEPLOYMENT.md",
   "n8n/workflows/integration-delivery-dispatch.json",
   "n8n/workflows/onboarding-finalization.json",
@@ -163,6 +165,13 @@ const checks = {
       .includes("MFA_STEP_UP_REQUIRED") &&
     fs.readFileSync("src/platform/mfa-policy.js", "utf8")
       .includes("EMAIL_VERIFICATION_REQUIRED"),
+  externalIngressIsolation:
+    composeText.includes("CONTROL_API_HOST_PORT") &&
+    composeText.includes("N8N_HOST_PORT") &&
+    fs.readFileSync("docker-compose.production.yml", "utf8")
+      .includes("standalone-ingress") &&
+    fs.readFileSync("scripts/render-host-caddy.mjs", "utf8")
+      .includes("reverse_proxy 127.0.0.1:"),
   productionDeploymentGate: (() => {
     const workflow = fs.readFileSync(
       ".github/workflows/deploy-production.yml",
@@ -179,9 +188,14 @@ const checks = {
       workflow.includes("StrictHostKeyChecking=yes") &&
       workflow.includes('PRODUCTION_SMOKE_STRICT: "true"') &&
       workflow.includes("DEPLOY_KNOWN_HOSTS") &&
+      workflow.includes("DEPLOY_INGRESS_MODE") &&
+      workflow.includes("CONTROL_API_HOST_PORT") &&
       workflow.includes("parseEnv") &&
+      workflow.includes("render-host-caddy.mjs") &&
       remote.includes("sha256sum") &&
       remote.includes("--env-file .env") &&
+      remote.includes("standalone-ingress") &&
+      remote.includes("127.0.0.1:") &&
       remote.includes("production-preflight.mjs") &&
       remote.includes("docker compose") &&
       remote.includes("healthz")

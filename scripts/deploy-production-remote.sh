@@ -6,6 +6,8 @@ incoming_env="${2:-}"
 deploy_root="${3:-}"
 release_sha="${4:-}"
 expected_archive_sha="${5:-}"
+ingress_mode="${6:-}"
+incoming_host_caddy="${7:-}"
 
 fail() {
   printf 'deploy error: %s\n' "$*" >&2
@@ -18,6 +20,11 @@ fail() {
 [[ "$deploy_root" != *".."* ]] || fail "deploy root cannot contain .."
 [[ "$release_sha" =~ ^[a-f0-9]{40}$ ]] || fail "release SHA is invalid"
 [[ "$expected_archive_sha" =~ ^[a-f0-9]{64}$ ]] || fail "archive checksum is invalid"
+[[ "$ingress_mode" == "external" || "$ingress_mode" == "standalone" ]] ||
+  fail "ingress mode must be external or standalone"
+if [[ "$ingress_mode" == "external" ]]; then
+  [[ -f "$incoming_host_caddy" ]] || fail "host Caddy snippet is missing"
+fi
 
 actual_archive_sha="$(sha256sum "$archive" | awk '{print $1}')"
 [[ "$actual_archive_sha" == "$expected_archive_sha" ]] ||
@@ -29,7 +36,7 @@ current_link="$deploy_root/current"
 previous_link="$deploy_root/previous"
 
 cleanup() {
-  rm -f "$incoming_env" "$archive"
+  rm -f "$incoming_env" "$archive" "$incoming_host_caddy"
   rm -rf "$staging_dir"
 }
 trap cleanup EXIT
@@ -55,6 +62,9 @@ if [[ ! -d "$release_dir" ]]; then
 fi
 
 install -m 600 "$incoming_env" "$release_dir/.env"
+if [[ "$ingress_mode" == "external" ]]; then
+  install -m 644 "$incoming_host_caddy" "$release_dir/host-caddy.caddy"
+fi
 
 if [[ -n "$current_real" && "$current_real" != "$release_dir" ]]; then
   ln -sfn "$current_real" "$previous_link"
@@ -72,6 +82,9 @@ compose=(
   -f docker-compose.yml
   -f docker-compose.production.yml
 )
+if [[ "$ingress_mode" == "standalone" ]]; then
+  compose+=(--profile standalone-ingress)
+fi
 
 "${compose[@]}" config --quiet
 "${compose[@]}" build --pull
@@ -91,7 +104,26 @@ docker run --rm \
   "$control_image" \
   scripts/production-preflight.mjs
 
+if [[ "$ingress_mode" == "external" ]]; then
+  standalone_compose=(
+    docker compose
+    --env-file .env
+    -p mecordxn8n
+    -f docker-compose.yml
+    -f docker-compose.production.yml
+    --profile standalone-ingress
+  )
+  "${standalone_compose[@]}" stop caddy >/dev/null 2>&1 || true
+  "${standalone_compose[@]}" rm -f caddy >/dev/null 2>&1 || true
+fi
+
 "${compose[@]}" up -d --remove-orphans
+
+if [[ "$ingress_mode" == "external" ]]; then
+  published="$("${compose[@]}" port control-api 8080 | head -n 1)"
+  [[ "$published" == 127.0.0.1:* || "$published" == "[::1]:"* ]] ||
+    fail "external ingress requires loopback-only control-api publication"
+fi
 
 ready=0
 for attempt in $(seq 1 45); do

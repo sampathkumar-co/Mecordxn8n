@@ -1,4 +1,7 @@
 const required = [
+  "INGRESS_MODE",
+  "CONTROL_API_HOST_PORT",
+  "N8N_HOST_PORT",
   "NODE_BASE_IMAGE",
   "PLAYWRIGHT_BASE_IMAGE",
   "POSTGRES_IMAGE",
@@ -42,6 +45,28 @@ const required = [
 const errors = [];
 const values = {};
 const DIGEST_IMAGE_RE = /^[^\s]+@sha256:[a-f0-9]{64}$/i;
+
+const ingressMode = String(process.env.INGRESS_MODE || "").trim().toLowerCase();
+if (!["external", "standalone"].includes(ingressMode)) {
+  errors.push("INGRESS_MODE must be external or standalone");
+}
+const controlApiHostPort = Number(process.env.CONTROL_API_HOST_PORT);
+const n8nHostPort = Number(process.env.N8N_HOST_PORT);
+for (const [name, value] of [
+  ["CONTROL_API_HOST_PORT", controlApiHostPort],
+  ["N8N_HOST_PORT", n8nHostPort],
+]) {
+  if (!Number.isInteger(value) || value < 1024 || value > 65535) {
+    errors.push(name + " must be an integer from 1024 to 65535");
+  }
+}
+if (
+  Number.isInteger(controlApiHostPort) &&
+  Number.isInteger(n8nHostPort) &&
+  controlApiHostPort === n8nHostPort
+) {
+  errors.push("CONTROL_API_HOST_PORT and N8N_HOST_PORT must be different");
+}
 for (const name of required) {
   const value = String(process.env[name] || "").trim();
   values[name] = value;
@@ -204,8 +229,20 @@ if (values.PUBLIC_APP_URL) {
   try { url = new URL(values.PUBLIC_APP_URL); } catch {}
   if (!url || url.protocol !== "https:") {
     errors.push("PUBLIC_APP_URL must be an HTTPS URL");
-  } else if (url.hostname !== values.APP_DOMAIN) {
-    errors.push("PUBLIC_APP_URL hostname must equal APP_DOMAIN");
+  } else {
+    if (
+      url.port ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash ||
+      (url.pathname !== "/" && url.pathname !== "")
+    ) {
+      errors.push("PUBLIC_APP_URL must be an origin-only HTTPS URL");
+    }
+    if (url.hostname !== values.APP_DOMAIN) {
+      errors.push("PUBLIC_APP_URL hostname must equal APP_DOMAIN");
+    }
   }
 }
 

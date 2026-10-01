@@ -97,7 +97,7 @@ services:
         condition: service_healthy
     command: sh -c "node scripts/migrate.mjs && node src/server.js"
     ports:
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:${CONTROL_API_HOST_PORT:-8080}:8080"
     networks:
       - edge
       - app-db
@@ -304,7 +304,7 @@ services:
       control-api:
         condition: service_started
     ports:
-      - "127.0.0.1:5678:5678"
+      - "127.0.0.1:${N8N_HOST_PORT:-5678}:5678"
     volumes:
       - n8n_data:/home/node/.n8n
     networks:

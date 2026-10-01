@@ -3,6 +3,7 @@ import { pathToFileURL } from "node:url";
 export function renderHostCaddy({
   publicAppUrl,
   controlApiHostPort,
+  upstream,
 }) {
   let url;
   try {
@@ -32,6 +33,20 @@ export function renderHostCaddy({
     throw new Error("CONTROL_API_HOST_PORT must be an integer from 1024 to 65535");
   }
 
+  const resolvedUpstream = String(
+    upstream || `127.0.0.1:${port}`,
+  ).trim();
+  const upstreamMatch = resolvedUpstream.match(
+    /^([A-Za-z0-9][A-Za-z0-9_.-]*):(\d{1,5})$/,
+  );
+  if (!upstreamMatch) {
+    throw new Error("HOST_CADDY_UPSTREAM must be host:port without a scheme");
+  }
+  const upstreamPort = Number(upstreamMatch[2]);
+  if (upstreamPort < 1 || upstreamPort > 65535) {
+    throw new Error("HOST_CADDY_UPSTREAM port is invalid");
+  }
+
   return `${url.hostname} {
   encode zstd gzip
   header {
@@ -50,23 +65,23 @@ export function renderHostCaddy({
   }
 
   handle /livez {
-    reverse_proxy 127.0.0.1:${port}
+    reverse_proxy ${resolvedUpstream}
   }
 
   handle /console {
-    reverse_proxy 127.0.0.1:${port}
+    reverse_proxy ${resolvedUpstream}
   }
 
   handle /console/* {
-    reverse_proxy 127.0.0.1:${port}
+    reverse_proxy ${resolvedUpstream}
   }
 
   handle /v1/platform/* {
-    reverse_proxy 127.0.0.1:${port}
+    reverse_proxy ${resolvedUpstream}
   }
 
   handle /v1/integrations/webhooks/* {
-    reverse_proxy 127.0.0.1:${port}
+    reverse_proxy ${resolvedUpstream}
   }
 
   handle {
@@ -86,6 +101,8 @@ if (invokedDirectly) {
       publicAppUrl: process.env.PUBLIC_APP_URL || process.argv[2],
       controlApiHostPort:
         process.env.CONTROL_API_HOST_PORT || process.argv[3],
+      upstream:
+        process.env.HOST_CADDY_UPSTREAM || process.argv[4],
     }),
   );
 }

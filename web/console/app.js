@@ -253,7 +253,11 @@ $("#signup-form").addEventListener("submit",async(event)=>{
 $("#bootstrap-form").addEventListener("submit",async(event)=>{
   event.preventDefault();
   try{
-    const response=await fetch("/v1/platform/bootstrap",{method:"POST",headers:{"content-type":"application/json",Authorization:`Bearer ${$("#bootstrap-token").value}`},body:JSON.stringify({
+    const response=await fetch("/v1/platform/bootstrap",{method:"POST",headers:{
+      "content-type":"application/json",
+      "X-Mecord-Session-Mode":"cookie",
+      Authorization:`Bearer ${$("#bootstrap-token").value}`,
+    },body:JSON.stringify({
       email:$("#bootstrap-email").value,displayName:$("#bootstrap-name").value,password:$("#bootstrap-password").value,
       workspaceName:$("#bootstrap-workspace").value,workspaceSlug:$("#bootstrap-slug").value||$("#bootstrap-workspace").value,
     })});

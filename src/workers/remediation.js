@@ -1,5 +1,6 @@
 import { CAPABILITIES } from "../authorization.js";
 import { MecordMcpClient } from "../mcp/mecord-client.js";
+import { mecordOAuthConfigFromEnv } from "../mcp/oauth-client-credentials.js";
 import { extractRepairLearning } from "../milestone-b/repair-intelligence.js";
 import {
   completeJob,
@@ -67,6 +68,7 @@ export async function runRemediationOnce({
       new MecordMcpClient({
         endpoint: process.env.MECORD_MCP_URL,
         token: process.env.MECORD_MCP_TOKEN,
+        oauth: mecordOAuthConfigFromEnv(process.env),
       });
 
     abortController = new AbortController();

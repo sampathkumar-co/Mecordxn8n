@@ -26,7 +26,11 @@ import {
   handleMilestoneHPlatformRoute,
   runMilestoneHMaintenance,
 } from "./milestone-h/routes.js";
-import { authenticatePlatformToken } from "./platform/auth.js";
+import {
+  authenticatePlatformToken,
+  verifyPlatformCsrf,
+} from "./platform/auth.js";
+import { platformSessionTokenFromRequest } from "./platform/session-http.js";
 import {
   handlePlatformPublicRoute,
   handlePlatformRoute,
@@ -38,6 +42,25 @@ import {
   handleIntegrationWebhookRoute,
   handleIntegrationWorkerRoute,
 } from "./integrations/routes.js";
+import {
+  assertWorkerBody,
+  authenticateWorkerCredential,
+  buildWorkerCredentials,
+  workerPathAllowed,
+} from "./workers/identity.js";
+import {
+  attachRequestLogging,
+  logUnhandledRequestError,
+  renderPrometheusMetrics,
+} from "./observability.js";
+import {
+  dispatchWorkerOnce,
+  knownDispatchWorker,
+} from "./orchestration/dispatch.js";
+import {
+  MAX_EVIDENCE_BYTES,
+  storeWorkerEvidence,
+} from "./evidence-store.js";
 
 const MAX_BODY_BYTES = 256 * 1024;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -293,18 +316,28 @@ function badRequest(message) {
 export function createServer({
   orchestratorToken = process.env.ORCHESTRATOR_TOKEN,
   workerToken = process.env.WORKER_TOKEN,
+  workerCredentials = null,
   bootstrapToken = process.env.BOOTSTRAP_TOKEN,
 } = {}) {
   if (!orchestratorToken) {
     throw new Error("ORCHESTRATOR_TOKEN is required");
   }
-  if (!workerToken) {
-    throw new Error("WORKER_TOKEN is required");
+  const resolvedWorkerCredentials =
+    workerCredentials ||
+    buildWorkerCredentials({
+      env: workerToken ? {} : process.env,
+      legacyToken: workerToken,
+    });
+  if (!resolvedWorkerCredentials.length) {
+    throw new Error("at least one worker credential is required");
   }
 
   const server = http.createServer(async (req, res) => {
+    let requestPath = "/";
     try {
       const url = new URL(req.url, "http://localhost");
+      requestPath = url.pathname;
+      attachRequestLogging(req, res, requestPath);
 
       if (req.method === "GET" && url.pathname === "/livez") {
         return json(res, 200, { ok: true });
@@ -313,6 +346,20 @@ export function createServer({
       if (req.method === "GET" && url.pathname === "/healthz") {
         await pingDatabase();
         return json(res, 200, { ok: true, database: "ready" });
+      }
+
+      if (req.method === "GET" && url.pathname === "/metrics") {
+        if (!requireBearer(req, orchestratorToken)) {
+          return json(res, 401, { error: "UNAUTHORIZED" });
+        }
+        const body = renderPrometheusMetrics();
+        res.writeHead(200, {
+          "content-type": "text/plain; version=0.0.4; charset=utf-8",
+          "content-length": Buffer.byteLength(body),
+          "cache-control": "no-store",
+          "x-content-type-options": "nosniff",
+        });
+        return res.end(body);
       }
 
       if (url.pathname.startsWith("/console")) {
@@ -334,6 +381,7 @@ export function createServer({
 
       if (url.pathname.startsWith("/v1/platform/")) {
         const rawBearer = bearerToken(req);
+        const rawCookie = platformSessionTokenFromRequest(req);
         const milestoneHPublicHandled = await handleMilestoneHPublicRoute({
           req,
           res,
@@ -357,9 +405,19 @@ export function createServer({
         });
         if (publicHandled !== false) return;
 
-        const principal = await authenticatePlatformToken(rawBearer);
+        const authToken = rawBearer || rawCookie;
+        const principal = await authenticatePlatformToken(authToken);
         if (!principal) {
           return json(res, 401, { error: "PLATFORM_UNAUTHORIZED" });
+        }
+        const cookieAuthenticated = !rawBearer && Boolean(rawCookie);
+        const mutating = !["GET", "HEAD", "OPTIONS"].includes(req.method || "GET");
+        if (
+          cookieAuthenticated &&
+          mutating &&
+          !verifyPlatformCsrf(principal, req.headers["x-csrf-token"])
+        ) {
+          return json(res, 403, { error: "CSRF_REQUIRED" });
         }
         const integrationHandled = await handleIntegrationPlatformRoute({
           req,
@@ -397,8 +455,58 @@ export function createServer({
       }
 
       const workerRoute = url.pathname.startsWith("/v1/worker/");
-      if (!requireBearer(req, workerRoute ? workerToken : orchestratorToken)) {
+      let workerPrincipal = null;
+      let routeReadJson = readJson;
+      if (workerRoute) {
+        workerPrincipal = authenticateWorkerCredential(
+          bearerToken(req),
+          resolvedWorkerCredentials,
+        );
+        if (!workerPrincipal) {
+          return json(res, 401, { error: "WORKER_UNAUTHORIZED" });
+        }
+        if (!workerPathAllowed(workerPrincipal, url.pathname)) {
+          return json(res, 403, { error: "WORKER_ROUTE_SCOPE" });
+        }
+        routeReadJson = async (request) =>
+          assertWorkerBody(workerPrincipal, await readJson(request));
+      } else if (!requireBearer(req, orchestratorToken)) {
         return json(res, 401, { error: "UNAUTHORIZED" });
+      }
+
+      const evidenceMatch = url.pathname.match(
+        /^\/v1\/worker\/evidence\/([0-9a-f-]+)$/i,
+      );
+      if (req.method === "POST" && evidenceMatch) {
+        const requestedWorkerId = String(req.headers["x-worker-id"] || "").trim();
+        const workerId = workerPrincipal?.workerId || requestedWorkerId;
+        if (!workerId) {
+          return json(res, 400, { error: "WORKER_ID_REQUIRED" });
+        }
+        assertWorkerBody(workerPrincipal, { workerId });
+        const bytes = await readRaw(req, MAX_EVIDENCE_BYTES);
+        const artifact = await storeWorkerEvidence({
+          jobId: evidenceMatch[1],
+          workerId,
+          expectedSha256: req.headers["x-evidence-sha256"],
+          bytes,
+          contentType: req.headers["content-type"],
+        });
+        return json(res, 201, artifact);
+      }
+
+      const dispatchMatch = url.pathname.match(
+        /^\/v1\/orchestration\/workers\/([a-z0-9-]+)\/run-once$/i,
+      );
+      if (req.method === "POST" && dispatchMatch) {
+        if (!knownDispatchWorker(dispatchMatch[1])) {
+          return json(res, 404, { error: "WORKER_DISPATCH_NOT_FOUND" });
+        }
+        return json(
+          res,
+          200,
+          await dispatchWorkerOnce(dispatchMatch[1]),
+        );
       }
 
       if (
@@ -420,7 +528,7 @@ export function createServer({
         res,
         url,
         json,
-        readJson,
+        readJson: routeReadJson,
         badRequest,
       });
       if (integrationWorkerHandled !== false) return;
@@ -430,7 +538,7 @@ export function createServer({
         res,
         url,
         json,
-        readJson,
+        readJson: routeReadJson,
         badRequest,
       });
       if (milestoneCHandled !== false) return;
@@ -440,7 +548,7 @@ export function createServer({
         res,
         url,
         json,
-        readJson,
+        readJson: routeReadJson,
         badRequest,
       });
       if (milestoneBHandled !== false) return;
@@ -450,13 +558,13 @@ export function createServer({
         res,
         url,
         json,
-        readJson,
+        readJson: routeReadJson,
         badRequest,
       });
       if (milestoneAHandled !== false) return;
 
       if (req.method === "POST" && url.pathname === "/v1/worker/jobs/lease") {
-        const body = normalizeLeaseInput(await readJson(req));
+        const body = normalizeLeaseInput(await routeReadJson(req));
         const job = await leaseNextJob(body);
         if (!job) return json(res, 204, {});
         return json(res, 200, job);
@@ -465,7 +573,7 @@ export function createServer({
       const findingMatch = url.pathname.match(/^\/v1\/worker\/jobs\/([0-9a-f-]+)\/findings$/i);
       if (req.method === "POST" && findingMatch) {
         if (!UUID_RE.test(findingMatch[1])) throw badRequest("job id is invalid");
-        const body = normalizeFindingInput(await readJson(req));
+        const body = normalizeFindingInput(await routeReadJson(req));
         const finding = await upsertFindingFromLease({
           jobId: findingMatch[1],
           ...body,
@@ -479,7 +587,7 @@ export function createServer({
       const completionMatch = url.pathname.match(/^\/v1\/worker\/jobs\/([0-9a-f-]+)\/complete$/i);
       if (req.method === "POST" && completionMatch) {
         if (!UUID_RE.test(completionMatch[1])) throw badRequest("job id is invalid");
-        const body = normalizeCompletionInput(await readJson(req));
+        const body = normalizeCompletionInput(await routeReadJson(req));
         const job = await completeLeasedJob({
           jobId: completionMatch[1],
           ...body,
@@ -549,6 +657,9 @@ export function createServer({
       return json(res, 404, { error: "NOT_FOUND" });
     } catch (error) {
       const statusCode = error.statusCode || 500;
+      if (statusCode >= 500) {
+        logUnhandledRequestError(error, req, res, requestPath);
+      }
       return json(res, statusCode, {
         error: statusCode >= 500 ? "INTERNAL_ERROR" : (error.code || "BAD_REQUEST"),
         message: statusCode >= 500 ? "unexpected server error" : error.message,

@@ -31,7 +31,17 @@ export async function api(path, options = {}) {
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const headers = new Headers(options.headers || {});
+    if (
+      path === "/v1/platform/auth/login" ||
+      path === "/v1/platform/auth/signup" ||
+      path === "/v1/platform/auth/accept-invite"
+    ) {
+      headers.set("X-Mecord-Session-Mode", "cookie");
+    }
     if (state.token) headers.set("Authorization", `Bearer ${state.token}`);
+    if (!retryable && state.csrfToken) {
+      headers.set("X-CSRF-Token", state.csrfToken);
+    }
     if (options.body && !headers.has("content-type")) headers.set("content-type", "application/json");
 
     let response;
@@ -39,6 +49,7 @@ export async function api(path, options = {}) {
       response = await fetch(path, {
         ...options,
         headers,
+        credentials: "same-origin",
         signal: requestSignal(options.signal, options.timeoutMs || 15000),
       });
     } catch (error) {
@@ -66,11 +77,28 @@ export async function api(path, options = {}) {
       ? null
       : await response.json().catch(() => ({ error: "INVALID_RESPONSE" }));
 
-    if (response.status === 401 && !path.includes("/auth/login") && !path.includes("/auth/signup")) {
-      document.dispatchEvent(new CustomEvent("mecord:auth-expired"));
+    if (
+      response.status === 401 &&
+      !path.includes("/auth/login") &&
+      !path.includes("/auth/signup") &&
+      !path.includes("/auth/logout")
+    ) {
+      if (state.token || state.csrfToken || state.me) {
+        document.dispatchEvent(new CustomEvent("mecord:auth-expired"));
+      }
       const expired = new Error("Your session has expired.");
       expired.status = 401;
       throw expired;
+    }
+
+    if (
+      response.status === 403 &&
+      ["EMAIL_VERIFICATION_REQUIRED","MFA_ENROLLMENT_REQUIRED","MFA_STEP_UP_REQUIRED"]
+        .includes(payload?.error)
+    ) {
+      document.dispatchEvent(new CustomEvent("mecord:security-action-required", {
+        detail: { code: payload.error },
+      }));
     }
 
     if (!response.ok) {

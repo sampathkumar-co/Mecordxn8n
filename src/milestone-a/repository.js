@@ -22,6 +22,29 @@ function mapFinding(row) {
   };
 }
 
+function immutableEvidenceArtifact(artifact) {
+  const path = String(artifact?.path || "");
+  const sha256 = String(artifact?.sha256 || "").toLowerCase();
+  if (
+    !/^evidence:\/\/sha256\/[a-f0-9]{64}$/i.test(path) ||
+    !/^[a-f0-9]{64}$/.test(sha256) ||
+    path.toLowerCase() !== `evidence://sha256/${sha256}` ||
+    !Number.isSafeInteger(Number(artifact?.byteLength)) ||
+    Number(artifact.byteLength) < 1
+  ) {
+    const error = new Error("verification artifacts must use immutable evidence references");
+    error.code = "EVIDENCE_REFERENCE_REQUIRED";
+    error.statusCode = 400;
+    throw error;
+  }
+  return {
+    ...artifact,
+    path,
+    sha256,
+    byteLength: Number(artifact.byteLength),
+  };
+}
+
 async function lockedLease(client, jobId, workerId) {
   const result = await client.query(
     `SELECT id, target_id, input
@@ -308,7 +331,8 @@ export async function recordVerificationFromLease({
       );
     }
 
-    for (const artifact of (artifacts || []).slice(0, 20)) {
+    for (const rawArtifact of (artifacts || []).slice(0, 20)) {
+      const artifact = immutableEvidenceArtifact(rawArtifact);
       await client.query(
         `INSERT INTO evidence_artifacts (
            target_id, finding_id, verification_id, kind, path,

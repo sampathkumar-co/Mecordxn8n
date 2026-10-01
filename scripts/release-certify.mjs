@@ -4,6 +4,14 @@ const requiredFiles = [
   "db/migrations/009_release_integrations.sql",
   "db/migrations/010_milestone_h_launch.sql",
   "db/migrations/011_post_h_hardening.sql",
+  "db/migrations/012_production_hardening_ii.sql",
+  "db/migrations/013_privileged_mfa.sql",
+  "db/migrations/014_account_recovery.sql",
+  "src/evidence-store.js",
+  "src/platform/mfa.js",
+  "src/platform/mfa-policy.js",
+  "src/platform/auth-mail.js",
+  "src/platform/dependencies.js",
   "src/platform/routes.js",
   "src/integrations/routes.js",
   "src/integrations/repository.js",
@@ -31,7 +39,15 @@ const requiredFiles = [
   "web/console/styles/components.css",
   "web/console/styles/views.css",
   "scripts/backup-database.mjs",
+  "scripts/backup-production-state.mjs",
+  "scripts/backup-evidence.mjs",
+  "scripts/verify-evidence-backup.mjs",
   "scripts/restore-verify.mjs",
+  "scripts/history-secret-scan.mjs",
+  "SECURITY.md",
+  ".github/CODEOWNERS",
+  ".github/dependabot.yml",
+  ".github/workflows/codeql.yml",
   ".github/workflows/security.yml",
   ".github/workflows/release.yml",
   "n8n/workflows/integration-delivery-dispatch.json",
@@ -121,6 +137,29 @@ const checks = {
   packageLockVersionMatches:
     JSON.parse(fs.readFileSync("package-lock.json", "utf8")).version ===
     JSON.parse(fs.readFileSync("package.json", "utf8")).version,
+  productionImagePinning:
+    composeText.includes("NODE_BASE_IMAGE") &&
+    composeText.includes("PLAYWRIGHT_BASE_IMAGE") &&
+    composeText.includes("POSTGRES_IMAGE") &&
+    composeText.includes("N8N_IMAGE") &&
+    fs.readFileSync("docker-compose.production.yml", "utf8").includes("CADDY_IMAGE"),
+  productionTrustZones:
+    composeText.includes("n8n-postgres:") &&
+    composeText.includes("evidence_store:/evidence") &&
+    !composeText.includes("browser_artifacts:/artifacts") &&
+    !composeText.includes("verification_artifacts:/artifacts"),
+  productionScopedWorkers:
+    composeText.includes("WORKER_TOKEN_BROWSER_QA") &&
+    composeText.includes("WORKER_TOKEN_REMEDIATION") &&
+    composeText.includes("WORKER_TOKEN_INTEGRATION"),
+  immutableEvidenceReferences:
+    fs.readFileSync("src/milestone-a/repository.js", "utf8")
+      .includes("evidence://sha256/"),
+  verifiedEmailAndMfa:
+    fs.readFileSync("src/platform/mfa-policy.js", "utf8")
+      .includes("MFA_STEP_UP_REQUIRED") &&
+    fs.readFileSync("src/platform/mfa-policy.js", "utf8")
+      .includes("EMAIL_VERIFICATION_REQUIRED"),
   productionVersion: JSON.parse(fs.readFileSync("package.json", "utf8")).version,
 };
 

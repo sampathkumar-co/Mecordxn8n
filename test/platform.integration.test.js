@@ -3,6 +3,10 @@ import assert from "node:assert/strict";
 
 import { closePool, pool } from "../src/repository.js";
 import { createServer } from "../src/server.js";
+import {
+  createDomainVerification,
+  completeDomainVerification,
+} from "../src/milestone-h/repository.js";
 
 const enabled = Boolean(process.env.DATABASE_URL);
 const ORCHESTRATOR_TOKEN = "platform-orchestrator";
@@ -74,6 +78,21 @@ function targetBody(host, organizationName = host) {
       ],
     },
   };
+}
+
+async function verifyTargetOwnership(workspaceId, target) {
+  const verification = await createDomainVerification({
+    workspaceId,
+    targetId: target.id,
+    hostname: new URL(target.baseUrl).hostname,
+  });
+  assert.ok(verification?.id);
+  const completed = await completeDomainVerification({
+    workspaceId,
+    verificationId: verification.id,
+    matched: true,
+  });
+  assert.equal(completed.status, "VERIFIED");
 }
 
 test(
@@ -340,6 +359,25 @@ test(
     });
 
     await t.test("operator job creation consumes workspace usage", async () => {
+      const unverified = await request(
+        `/v1/platform/workspaces/${workspaceA.id}/jobs`,
+        {
+          method: "POST",
+          token: ownerToken,
+          body: {
+            targetId: targetA.id,
+            jobType: "ownership-gate-proof",
+            capability: "PUBLIC_HTTP_OBSERVE",
+            requestedUrl: targetA.baseUrl,
+            input: {},
+          },
+        },
+      );
+      assert.equal(unverified.status, 409);
+      assert.equal(unverified.body.error, "DOMAIN_VERIFICATION_REQUIRED");
+
+      await verifyTargetOwnership(workspaceA.id, targetA);
+
       const before = await request(
         `/v1/platform/workspaces/${workspaceA.id}/subscription`,
         { token: ownerToken },

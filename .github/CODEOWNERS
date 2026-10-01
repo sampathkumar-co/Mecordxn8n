@@ -1,0 +1,8 @@
+* @sampathkumar-co
+/.github/ @sampathkumar-co
+/db/migrations/ @sampathkumar-co
+/src/platform/ @sampathkumar-co
+/src/integrations/ @sampathkumar-co
+/src/workers/ @sampathkumar-co
+/deploy/ @sampathkumar-co
+/docker-compose*.yml @sampathkumar-co

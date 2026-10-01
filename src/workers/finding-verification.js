@@ -6,6 +6,7 @@ import {
   getFindingContext,
   leaseJob,
   recordVerification,
+  uploadEvidenceArtifact,
 } from "./control-client.js";
 import { findingForObservation, observePublicHttpUrl } from "./public-http.js";
 
@@ -65,7 +66,20 @@ export async function runFindingVerificationOnce({
     const attempts = Math.min(Math.max(Number(job.input?.attempts || 2), 2), 3);
     const runs = [];
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
-      runs.push(await reproduce(finding, job.id, attempt, { browserAudit, httpObserve }));
+      const run = await reproduce(finding, job.id, attempt, {
+        browserAudit,
+        httpObserve,
+      });
+      if (run.artifact) {
+        run.artifact = await uploadEvidenceArtifact({
+          controlApiUrl,
+          workerToken,
+          workerId,
+          jobId: job.id,
+          artifact: run.artifact,
+        });
+      }
+      runs.push(run);
     }
 
     const matchedAttempts = runs.filter((run) => run.matched).length;

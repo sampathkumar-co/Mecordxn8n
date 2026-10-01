@@ -76,6 +76,25 @@ test("unknown console file extensions and traversal-like asset paths are not ser
   assert.equal(encoded.status, 404);
 });
 
+test("Control Center navigation iterates the full navigation collection", () => {
+  const source = fs.readFileSync(path.resolve("web/console/app.js"), "utf8");
+  assert.match(
+    source,
+    /\$\$\("\[data-link\]\[data-area\], \[data-link\]\[data-route-name\]"\)\.forEach/,
+  );
+  assert.equal(
+    /(^|[^$])\$\("\[data-link\]\[data-area\], \[data-link\]\[data-route-name\]"\)\.forEach/m.test(source),
+    false,
+  );
+});
+
+test("Control Center browser routing does not depend on legacy bearer storage", () => {
+  const source = fs.readFileSync(path.resolve("web/console/app.js"), "utf8");
+  assert.equal(source.includes("if (!state.token || !state.me) return;"), false);
+  assert.match(source, /if \(!state\.me\) return;/);
+  assert.match(source, /login-mfa-row/);
+});
+
 test("Control Center V2 remains CSP-compatible without inline style attributes or nested dialog forms", () => {
   const root = path.resolve("web/console");
   const files = [];

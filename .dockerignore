@@ -1,0 +1,17 @@
+.git
+.github
+.env
+.env.*
+!.env.example
+node_modules
+artifacts
+playwright-report
+test-results
+coverage
+*.log
+*.backup
+*.dump
+*.sql.gz
+.DS_Store
+.vscode
+.idea

@@ -12,15 +12,13 @@ services:
       - "5678"
 
   caddy:
-    image: caddy:2.10-alpine
+    image: ${CADDY_IMAGE:-caddy:2.10-alpine}
     restart: unless-stopped
     environment:
       APP_DOMAIN: ${APP_DOMAIN}
       ACME_EMAIL: ${ACME_EMAIL}
     depends_on:
       control-api:
-        condition: service_started
-      n8n:
         condition: service_started
     ports:
       - "80:80"
@@ -30,6 +28,8 @@ services:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
+    networks:
+      - edge
 
 volumes:
   caddy_data:

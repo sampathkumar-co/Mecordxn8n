@@ -24,13 +24,13 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.MECORDXN8N_REMEDIATION_URL + '/run-once' }}",
+        "url": "={{ $env.MECORDXN8N_CONTROL_API_URL + '/v1/orchestration/workers/remediation/run-once' }}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
             {
               "name": "Authorization",
-              "value": "={{ 'Bearer ' + $env.MECORDXN8N_WORKER_TRIGGER_TOKEN }}"
+              "value": "={{ 'Bearer ' + $env.MECORDXN8N_ORCHESTRATOR_TOKEN }}"
             }
           ]
         },

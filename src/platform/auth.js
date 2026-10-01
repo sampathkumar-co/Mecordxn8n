@@ -7,11 +7,22 @@ import {
 
 import { pool } from "../repository.js";
 import { limitsForPlan } from "./plans.js";
+import {
+  beginTotpEnrollment,
+  confirmTotpEnrollment,
+  disableTotp,
+  getMfaStatus,
+  verifyUserMfa,
+} from "./mfa.js";
 
 const SESSION_TTL_HOURS = 12;
 const INVITE_TTL_HOURS = 72;
 const SESSION_PREFIX = "mcs_";
+const CSRF_PREFIX = "mcc_";
 const API_KEY_PREFIX = "mck_";
+const EMAIL_VERIFY_PREFIX = "mcv_";
+const PASSWORD_RESET_PREFIX = "mpr_";
+const CURRENT_PASSWORD_VERSION = 2;
 const DUMMY_PASSWORD_SALT =
   "000000000000000000000000000000000000000000000000";
 
@@ -23,13 +34,39 @@ function randomToken(prefix, bytes = 32) {
   return `${prefix}${randomBytes(bytes).toString("base64url")}`;
 }
 
-function passwordDigest(password, salt) {
-  return scryptSync(password, salt, 64, {
-    N: 16384,
-    r: 8,
-    p: 1,
-    maxmem: 64 * 1024 * 1024,
-  }).toString("hex");
+function passwordDigest(password, salt, version = CURRENT_PASSWORD_VERSION) {
+  const current = Number(version || 1) >= CURRENT_PASSWORD_VERSION;
+  return scryptSync(password, salt, 64, current
+    ? {
+        N: 32768,
+        r: 8,
+        p: 3,
+        maxmem: 128 * 1024 * 1024,
+      }
+    : {
+        N: 16384,
+        r: 8,
+        p: 1,
+        maxmem: 64 * 1024 * 1024,
+      }).toString("hex");
+}
+
+async function upgradePasswordIfNeeded(client, user, password) {
+  if (Number(user.password_version || 1) >= CURRENT_PASSWORD_VERSION) return;
+  const salt = randomBytes(24).toString("hex");
+  const digest = passwordDigest(password, salt, CURRENT_PASSWORD_VERSION);
+  await client.query(
+    `UPDATE platform_users
+        SET password_salt = $2,
+            password_hash = $3,
+            password_version = $4,
+            updated_at = now()
+      WHERE id = $1`,
+    [user.id, salt, digest, CURRENT_PASSWORD_VERSION],
+  );
+  user.password_salt = salt;
+  user.password_hash = digest;
+  user.password_version = CURRENT_PASSWORD_VERSION;
 }
 
 function safeHexEqual(actual, expected) {
@@ -82,30 +119,47 @@ function publicUser(row) {
     email: row.email,
     displayName: row.display_name,
     status: row.status,
+    emailVerified: Boolean(row.email_verified_at),
     isPlatformOperator: Boolean(row.is_platform_operator),
   };
 }
 
-async function issueSession(client, user, userAgent = "") {
+async function issueSession(
+  client,
+  user,
+  userAgent = "",
+  { mfaVerified = false } = {},
+) {
   const token = randomToken(SESSION_PREFIX);
+  const csrfToken = randomToken(CSRF_PREFIX, 24);
   const tokenHash = sha256(token);
+  const csrfHash = sha256(csrfToken);
   const result = await client.query(
     `INSERT INTO platform_sessions (
-       user_id, token_hash, user_agent_hash, expires_at
+       user_id, token_hash, csrf_hash, user_agent_hash,
+       mfa_verified_at, expires_at
      )
-     VALUES ($1,$2,$3,now() + ($4 * interval '1 hour'))
-     RETURNING id, expires_at`,
+     VALUES (
+       $1,$2,$3,$4,
+       CASE WHEN $5::boolean THEN now() ELSE NULL END,
+       now() + ($6 * interval '1 hour')
+     )
+     RETURNING id, expires_at, mfa_verified_at`,
     [
       user.id,
       tokenHash,
+      csrfHash,
       userAgent ? sha256(String(userAgent).slice(0, 1000)) : null,
+      Boolean(mfaVerified),
       SESSION_TTL_HOURS,
     ],
   );
   return {
     token,
+    csrfToken,
     sessionId: result.rows[0].id,
     expiresAt: result.rows[0].expires_at,
+    mfaVerifiedAt: result.rows[0].mfa_verified_at || null,
   };
 }
 
@@ -145,15 +199,17 @@ export async function bootstrapPlatformOwner({
     const salt = randomBytes(24).toString("hex");
     const userResult = await client.query(
       `INSERT INTO platform_users (
-         email, display_name, password_salt, password_hash, is_platform_operator
+         email, display_name, password_salt, password_hash,
+         password_version, is_platform_operator, email_verified_at
        )
-       VALUES ($1,$2,$3,$4,true)
+       VALUES ($1,$2,$3,$4,$5,true,now())
        RETURNING *`,
       [
         normalizedEmail,
         display,
         salt,
-        passwordDigest(normalizedPassword, salt),
+        passwordDigest(normalizedPassword, salt, CURRENT_PASSWORD_VERSION),
+        CURRENT_PASSWORD_VERSION,
       ],
     );
     const user = userResult.rows[0];
@@ -245,15 +301,16 @@ export async function registerSelfServeOwner({
     const salt = randomBytes(24).toString("hex");
     const userResult = await client.query(
       `INSERT INTO platform_users (
-         email, display_name, password_salt, password_hash
+         email, display_name, password_salt, password_hash, password_version
        )
-       VALUES ($1,$2,$3,$4)
+       VALUES ($1,$2,$3,$4,$5)
        RETURNING *`,
       [
         normalizedEmail,
         display,
         salt,
-        passwordDigest(normalizedPassword, salt),
+        passwordDigest(normalizedPassword, salt, CURRENT_PASSWORD_VERSION),
+        CURRENT_PASSWORD_VERSION,
       ],
     );
     const user = userResult.rows[0];
@@ -320,6 +377,7 @@ export async function registerSelfServeOwner({
 export async function loginPlatformUser({
   email,
   password,
+  mfaCode = null,
   userAgent = "",
 }) {
   const normalizedEmail = normalizeEmail(email);
@@ -335,13 +393,21 @@ export async function loginPlatformUser({
     );
 
     if (result.rowCount === 0) {
-      passwordDigest(normalizedPassword, DUMMY_PASSWORD_SALT);
+      passwordDigest(
+        normalizedPassword,
+        DUMMY_PASSWORD_SALT,
+        CURRENT_PASSWORD_VERSION,
+      );
       await client.query("ROLLBACK");
       return null;
     }
 
     const user = result.rows[0];
-    const digest = passwordDigest(normalizedPassword, user.password_salt);
+    const digest = passwordDigest(
+      normalizedPassword,
+      user.password_salt,
+      user.password_version || 1,
+    );
     if (
       user.status !== "ACTIVE" ||
       (user.locked_until && new Date(user.locked_until).getTime() > Date.now())
@@ -373,6 +439,27 @@ export async function loginPlatformUser({
       return null;
     }
 
+    await upgradePasswordIfNeeded(client, user, normalizedPassword);
+
+    const mfa = await verifyUserMfa(client, {
+      userId: user.id,
+      code: mfaCode,
+    });
+    if (mfa.required && !mfa.verified) {
+      await client.query(
+        `INSERT INTO workspace_security_events (
+           user_id, event_type, severity, metadata
+         )
+         VALUES ($1,'MFA_CHALLENGE_REQUIRED','INFO','{}'::jsonb)`,
+        [user.id],
+      );
+      await client.query("COMMIT");
+      return {
+        mfaRequired: true,
+        user: publicUser(user),
+      };
+    }
+
     await client.query(
       `UPDATE platform_users
           SET failed_login_count = 0,
@@ -382,10 +469,14 @@ export async function loginPlatformUser({
         WHERE id = $1`,
       [user.id],
     );
-    const session = await issueSession(client, user, userAgent);
+    const session = await issueSession(client, user, userAgent, {
+      mfaVerified: Boolean(mfa.required && mfa.verified),
+    });
     await client.query("COMMIT");
     return {
       user: publicUser(user),
+      mfaRequired: false,
+      recoveryCodeUsed: Boolean(mfa.recoveryUsed),
       ...session,
     };
   } catch (error) {
@@ -528,24 +619,38 @@ export async function acceptWorkspaceInvite({
       const salt = randomBytes(24).toString("hex");
       userResult = await client.query(
         `INSERT INTO platform_users (
-           email, display_name, password_salt, password_hash
+           email, display_name, password_salt, password_hash, password_version,
+           email_verified_at
          )
-         VALUES ($1,$2,$3,$4)
+         VALUES ($1,$2,$3,$4,$5,now())
          RETURNING *`,
         [
           invite.email,
           display,
           salt,
-          passwordDigest(normalizedPassword, salt),
+          passwordDigest(normalizedPassword, salt, CURRENT_PASSWORD_VERSION),
+          CURRENT_PASSWORD_VERSION,
         ],
       );
       user = userResult.rows[0];
     } else {
       user = userResult.rows[0];
-      const digest = passwordDigest(normalizedPassword, user.password_salt);
+      const digest = passwordDigest(
+        normalizedPassword,
+        user.password_salt,
+        user.password_version || 1,
+      );
       if (!safeHexEqual(digest, user.password_hash)) {
         await client.query("ROLLBACK");
         return null;
+      }
+      await upgradePasswordIfNeeded(client, user, normalizedPassword);
+      if (!user.email_verified_at) {
+        await client.query(
+          "UPDATE platform_users SET email_verified_at = now(), updated_at = now() WHERE id = $1",
+          [user.id],
+        );
+        user.email_verified_at = new Date();
       }
     }
 
@@ -582,10 +687,14 @@ export async function authenticatePlatformToken(token) {
 
   if (raw.startsWith(SESSION_PREFIX)) {
     const result = await pool.query(
-      `SELECT s.id AS principal_id, s.user_id, s.expires_at,
-              u.email, u.display_name, u.status, u.is_platform_operator
+      `SELECT s.id AS principal_id, s.user_id, s.expires_at, s.csrf_hash,
+              s.mfa_verified_at,
+              u.email, u.display_name, u.status, u.is_platform_operator,
+              u.email_verified_at,
+              (m.enabled_at IS NOT NULL) AS mfa_enabled
          FROM platform_sessions s
          JOIN platform_users u ON u.id = s.user_id
+         LEFT JOIN platform_user_mfa m ON m.user_id = u.id
         WHERE s.token_hash = $1
           AND s.revoked_at IS NULL
           AND s.expires_at > now()
@@ -605,8 +714,12 @@ export async function authenticatePlatformToken(token) {
         id: result.rows[0].user_id,
         email: result.rows[0].email,
         displayName: result.rows[0].display_name,
+        emailVerified: Boolean(result.rows[0].email_verified_at),
         isPlatformOperator: Boolean(result.rows[0].is_platform_operator),
       },
+      csrfHash: result.rows[0].csrf_hash || null,
+      mfaEnabled: Boolean(result.rows[0].mfa_enabled),
+      mfaVerifiedAt: result.rows[0].mfa_verified_at || null,
       rateLimitPerHour: 4000,
     };
   }
@@ -636,6 +749,226 @@ export async function authenticatePlatformToken(token) {
   }
 
   return null;
+}
+
+async function issuePlatformAuthToken(client, { userId, kind }) {
+  const config = kind === "EMAIL_VERIFY"
+    ? { prefix: EMAIL_VERIFY_PREFIX, minutes: 30 }
+    : kind === "PASSWORD_RESET"
+      ? { prefix: PASSWORD_RESET_PREFIX, minutes: 20 }
+      : null;
+  if (!config) throw new Error("unsupported platform auth token kind");
+
+  await client.query(
+    `UPDATE platform_auth_tokens
+        SET consumed_at = COALESCE(consumed_at, now())
+      WHERE user_id = $1
+        AND kind = $2
+        AND consumed_at IS NULL`,
+    [userId, kind],
+  );
+
+  const token = randomToken(config.prefix);
+  const result = await client.query(
+    `INSERT INTO platform_auth_tokens (
+       user_id, kind, token_hash, expires_at
+     )
+     VALUES ($1,$2,$3,now() + ($4 * interval '1 minute'))
+     RETURNING expires_at`,
+    [userId, kind, sha256(token), config.minutes],
+  );
+  return {
+    token,
+    expiresAt: result.rows[0].expires_at,
+  };
+}
+
+export async function createEmailVerificationToken(userId) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const user = await client.query(
+      `SELECT * FROM platform_users
+        WHERE id = $1
+          AND status = 'ACTIVE'
+        FOR UPDATE`,
+      [userId],
+    );
+    if (user.rowCount === 0 || user.rows[0].email_verified_at) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+    const issued = await issuePlatformAuthToken(client, {
+      userId,
+      kind: "EMAIL_VERIFY",
+    });
+    await client.query("COMMIT");
+    return {
+      ...issued,
+      user: publicUser(user.rows[0]),
+    };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function requestPasswordResetToken(email) {
+  const normalizedEmail = normalizeEmail(email);
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const user = await client.query(
+      `SELECT * FROM platform_users
+        WHERE lower(email) = $1
+          AND status = 'ACTIVE'
+        FOR UPDATE`,
+      [normalizedEmail],
+    );
+    if (user.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+    const issued = await issuePlatformAuthToken(client, {
+      userId: user.rows[0].id,
+      kind: "PASSWORD_RESET",
+    });
+    await client.query("COMMIT");
+    return {
+      ...issued,
+      user: publicUser(user.rows[0]),
+    };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function verifyEmailWithToken(token) {
+  const raw = String(token || "");
+  if (!raw.startsWith(EMAIL_VERIFY_PREFIX)) return false;
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const found = await client.query(
+      `SELECT t.id, t.user_id
+         FROM platform_auth_tokens t
+         JOIN platform_users u ON u.id = t.user_id
+        WHERE t.token_hash = $1
+          AND t.kind = 'EMAIL_VERIFY'
+          AND t.consumed_at IS NULL
+          AND t.expires_at > now()
+          AND u.status = 'ACTIVE'
+        FOR UPDATE OF t, u`,
+      [sha256(raw)],
+    );
+    if (found.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return false;
+    }
+    await client.query(
+      `UPDATE platform_users
+          SET email_verified_at = COALESCE(email_verified_at, now()),
+              updated_at = now()
+        WHERE id = $1`,
+      [found.rows[0].user_id],
+    );
+    await client.query(
+      "UPDATE platform_auth_tokens SET consumed_at = now() WHERE id = $1",
+      [found.rows[0].id],
+    );
+    await client.query("COMMIT");
+    return true;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function resetPasswordWithToken({ token, password }) {
+  const raw = String(token || "");
+  if (!raw.startsWith(PASSWORD_RESET_PREFIX)) return false;
+  const normalizedPassword = validatePassword(password);
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const found = await client.query(
+      `SELECT t.id, t.user_id
+         FROM platform_auth_tokens t
+         JOIN platform_users u ON u.id = t.user_id
+        WHERE t.token_hash = $1
+          AND t.kind = 'PASSWORD_RESET'
+          AND t.consumed_at IS NULL
+          AND t.expires_at > now()
+          AND u.status = 'ACTIVE'
+        FOR UPDATE OF t, u`,
+      [sha256(raw)],
+    );
+    if (found.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return false;
+    }
+
+    const salt = randomBytes(24).toString("hex");
+    const digest = passwordDigest(
+      normalizedPassword,
+      salt,
+      CURRENT_PASSWORD_VERSION,
+    );
+    await client.query(
+      `UPDATE platform_users
+          SET password_salt = $2,
+              password_hash = $3,
+              password_version = $4,
+              failed_login_count = 0,
+              locked_until = NULL,
+              email_verified_at = COALESCE(email_verified_at, now()),
+              updated_at = now()
+        WHERE id = $1`,
+      [
+        found.rows[0].user_id,
+        salt,
+        digest,
+        CURRENT_PASSWORD_VERSION,
+      ],
+    );
+    await client.query(
+      `UPDATE platform_sessions
+          SET revoked_at = COALESCE(revoked_at, now())
+        WHERE user_id = $1`,
+      [found.rows[0].user_id],
+    );
+    await client.query(
+      `UPDATE platform_auth_tokens
+          SET consumed_at = COALESCE(consumed_at, now())
+        WHERE user_id = $1
+          AND kind = 'PASSWORD_RESET'
+          AND consumed_at IS NULL`,
+      [found.rows[0].user_id],
+    );
+    await client.query("COMMIT");
+    return true;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function purgeExpiredPlatformAuthTokens() {
+  const result = await pool.query(
+    `DELETE FROM platform_auth_tokens
+      WHERE expires_at < now() - interval '24 hours'
+         OR consumed_at < now() - interval '24 hours'`,
+  );
+  return result.rowCount;
 }
 
 export async function consumePlatformRateLimit(principal) {
@@ -814,6 +1147,130 @@ export async function revokePlatformSession(sessionId) {
     "UPDATE platform_sessions SET revoked_at = now() WHERE id = $1",
     [sessionId],
   );
+}
+
+export async function getPlatformMfaStatus(userId) {
+  return await getMfaStatus(pool, userId);
+}
+
+export async function beginPlatformMfaEnrollment({ userId, email }) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const current = await getMfaStatus(client, userId);
+    if (current.enabled) {
+      const error = new Error("MFA is already enabled");
+      error.statusCode = 409;
+      error.code = "MFA_ALREADY_ENABLED";
+      throw error;
+    }
+    const result = await beginTotpEnrollment(client, { userId, email });
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function confirmPlatformMfaEnrollment({
+  userId,
+  sessionId,
+  code,
+}) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const enabled = await confirmTotpEnrollment(client, { userId, code });
+    if (!enabled) {
+      await client.query("ROLLBACK");
+      return false;
+    }
+    await client.query(
+      `UPDATE platform_sessions
+          SET revoked_at = CASE WHEN id = $2 THEN revoked_at ELSE now() END,
+              mfa_verified_at = CASE WHEN id = $2 THEN now() ELSE mfa_verified_at END
+        WHERE user_id = $1
+          AND revoked_at IS NULL`,
+      [userId, sessionId],
+    );
+    await client.query("COMMIT");
+    return true;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function verifyPlatformMfaStepUp({
+  userId,
+  sessionId,
+  code,
+}) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await verifyUserMfa(client, { userId, code });
+    if (!result.required || !result.verified) {
+      await client.query("ROLLBACK");
+      return false;
+    }
+    await client.query(
+      `UPDATE platform_sessions
+          SET mfa_verified_at = now()
+        WHERE id = $1
+          AND user_id = $2
+          AND revoked_at IS NULL`,
+      [sessionId, userId],
+    );
+    await client.query("COMMIT");
+    return true;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function disablePlatformMfa({
+  userId,
+  sessionId,
+  code,
+}) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await verifyUserMfa(client, { userId, code });
+    if (!result.required || !result.verified) {
+      await client.query("ROLLBACK");
+      return false;
+    }
+    await disableTotp(client, userId);
+    await client.query(
+      `UPDATE platform_sessions
+          SET revoked_at = CASE WHEN id = $2 THEN revoked_at ELSE now() END
+        WHERE user_id = $1
+          AND revoked_at IS NULL`,
+      [userId, sessionId],
+    );
+    await client.query("COMMIT");
+    return true;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export function verifyPlatformCsrf(principal, token) {
+  if (principal?.kind !== "SESSION" || !principal.csrfHash) return false;
+  return safeHexEqual(sha256(String(token || "")), principal.csrfHash);
 }
 
 export function hashPlatformToken(token) {

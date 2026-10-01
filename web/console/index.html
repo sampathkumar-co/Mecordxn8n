@@ -43,7 +43,9 @@
         </div>
         <label>Email<input id="login-email" name="email" type="email" autocomplete="username" required></label>
         <label>Password<input id="login-password" name="password" type="password" autocomplete="current-password" minlength="12" required></label>
-        <button class="button primary" type="submit">Sign in</button>
+        <label id="login-mfa-row" class="hidden">Authenticator or recovery code<input id="login-mfa-code" name="mfaCode" autocomplete="one-time-code" inputmode="numeric" maxlength="64"></label>
+        <button id="login-submit" class="button primary" type="submit">Sign in</button>
+        <button id="show-forgot-password" class="button text" type="button">Forgot password?</button>
         <button id="show-signup" class="button text" type="button">New customer? Start free trial</button>
         <button id="show-bootstrap" class="button text" type="button">First deployment? Bootstrap owner</button>
       </form>
@@ -58,7 +60,7 @@
         <label>Email<input id="signup-email" type="email" autocomplete="email" required></label>
         <label>Password<input id="signup-password" type="password" minlength="12" maxlength="128" autocomplete="new-password" required></label>
         <label>Workspace name<input id="signup-workspace" maxlength="160" required></label>
-        <label>Workspace slug<input id="signup-slug" maxlength="80" pattern="[A-Za-z0-9-]+"></label>
+        <label>Workspace slug<input id="signup-slug" maxlength="80" pattern="[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*"></label>
         <button class="button primary" type="submit">Start trial</button>
         <button id="signup-back-login" class="button text" type="button">Back to sign in</button>
       </form>
@@ -74,9 +76,32 @@
         <label>Owner email<input id="bootstrap-email" type="email" autocomplete="email" required></label>
         <label>Password<input id="bootstrap-password" type="password" minlength="12" maxlength="128" autocomplete="new-password" required></label>
         <label>Workspace name<input id="bootstrap-workspace" maxlength="160" required></label>
-        <label>Workspace slug<input id="bootstrap-slug" maxlength="80" pattern="[A-Za-z0-9-]+"></label>
+        <label>Workspace slug<input id="bootstrap-slug" maxlength="80" pattern="[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*"></label>
         <button class="button primary" type="submit">Create workspace</button>
         <button id="show-login" class="button text" type="button">Back to sign in</button>
+      </form>
+
+      <form id="forgot-password-form" class="auth-card hidden">
+        <div>
+          <p class="eyebrow">ACCOUNT RECOVERY</p>
+          <h2>Reset password</h2>
+          <p class="muted">Enter your account email. If an account exists, a short-lived reset link will be sent.</p>
+        </div>
+        <label>Email<input id="forgot-password-email" type="email" autocomplete="email" required></label>
+        <button class="button primary" type="submit">Send reset link</button>
+        <button id="forgot-back-login" class="button text" type="button">Back to sign in</button>
+      </form>
+
+      <form id="reset-password-form" class="auth-card hidden">
+        <div>
+          <p class="eyebrow">ACCOUNT RECOVERY</p>
+          <h2>Choose a new password</h2>
+          <p class="muted">This link is one-time and short-lived. A successful reset signs out every existing session.</p>
+        </div>
+        <label>New password<input id="reset-password-new" type="password" minlength="12" maxlength="128" autocomplete="new-password" required></label>
+        <label>Confirm password<input id="reset-password-confirm" type="password" minlength="12" maxlength="128" autocomplete="new-password" required></label>
+        <button class="button primary" type="submit">Reset password</button>
+        <button id="reset-back-login" class="button text" type="button">Back to sign in</button>
       </form>
     </section>
   </main>

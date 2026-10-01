@@ -11,6 +11,7 @@ import {
   recordFinding,
   recordMonitoringFailure,
   recordMonitoringRun,
+  uploadEvidenceArtifact,
 } from "./control-client.js";
 import { isPublicAddress } from "./public-http.js";
 import {
@@ -591,6 +592,15 @@ export async function runBrowserQaOnce({
       artifactName: job.id,
       captureScreenshot: job.input?.captureScreenshot !== false,
     });
+    if (observation.artifact) {
+      observation.artifact = await uploadEvidenceArtifact({
+        controlApiUrl,
+        workerToken,
+        workerId,
+        jobId: job.id,
+        artifact: observation.artifact,
+      });
+    }
     const findings = buildBrowserFindings(observation);
 
     for (const finding of findings) {

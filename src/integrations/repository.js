@@ -28,6 +28,7 @@ function decryptRow(row) {
     ciphertext: row.config_ciphertext,
     iv: row.config_iv,
     tag: row.config_tag,
+    version: row.config_version || 1,
     workspaceId: row.workspace_id,
     provider: row.provider,
   });

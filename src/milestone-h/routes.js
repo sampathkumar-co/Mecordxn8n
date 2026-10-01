@@ -1,3 +1,4 @@
+import { assertPrivilegedMfa, assertVerifiedEmail } from "../platform/mfa-policy.js";
 import {
   AUTHORIZATION_MODES,
   CAPABILITIES,
@@ -18,6 +19,7 @@ import { buildClientProposal } from "../milestone-a/report.js";
 import {
   registerSelfServeOwner,
   accessAllows,
+  createEmailVerificationToken,
   getWorkspaceAccess,
 } from "../platform/auth.js";
 import { getWorkspaceSubscription } from "../platform/repository.js";
@@ -28,6 +30,9 @@ import {
   verifyStripeSignature,
 } from "./billing.js";
 import { verifyDnsTxtOwnership } from "./domain.js";
+import { setPlatformSessionCookie } from "../platform/session-http.js";
+import { getDependencyHealth } from "../platform/dependencies.js";
+import { deliverAuthMail } from "../platform/auth-mail.js";
 import {
   completeBillingCheckout,
   completeDomainVerification,
@@ -61,6 +66,14 @@ const UUID_RE =
 
 function validId(value) {
   return UUID_RE.test(String(value || ""));
+}
+
+function browserSessionResponse(req, result) {
+  if (String(req.headers["x-mecord-session-mode"] || "").toLowerCase() !== "cookie") {
+    return result;
+  }
+  const { token: _token, ...safe } = result;
+  return safe;
 }
 
 function publicClientAddress(req) {
@@ -191,7 +204,28 @@ export async function handleMilestoneHPublicRoute({
         workspaceSlug: body.workspaceSlug || body.workspaceName,
         userAgent: req.headers["user-agent"] || "",
       });
-      return json(res, 201, result);
+      setPlatformSessionCookie(res, result.token, result.expiresAt);
+      let verificationDelivery = { configured: false, delivered: false };
+      try {
+        const verification = await createEmailVerificationToken(result.user.id);
+        if (verification) {
+          verificationDelivery = await deliverAuthMail({
+            kind: "EMAIL_VERIFY",
+            email: result.user.email,
+            token: verification.token,
+            expiresAt: verification.expiresAt,
+          });
+        }
+      } catch {
+        verificationDelivery = { configured: true, delivered: false };
+      }
+      return json(res, 201, {
+        ...browserSessionResponse(req, result),
+        emailVerification: {
+          required: !result.user.emailVerified,
+          delivered: Boolean(verificationDelivery.delivered),
+        },
+      });
     } catch (error) {
       if (error.code === "23505" || error.code === "ACCOUNT_EXISTS") {
         return json(res, 409, { error: "SIGNUP_CONFLICT" });
@@ -299,6 +333,7 @@ export async function handleMilestoneHPlatformRoute({
       minimumRole: "ADMIN",
       apiScope: "targets:write",
     });
+    assertPrivilegedMfa(principal);
     const center = await listTargetAuthorizationCenter({
       workspaceId: match[1],
       targetId: match[2],
@@ -397,6 +432,14 @@ export async function handleMilestoneHPlatformRoute({
     if (!center) return json(res, 404, { error: "TARGET_NOT_FOUND" });
     const body = await readJson(req);
     const normalized = normalizeAuthorizationUpdate(body, center.target, badRequest);
+    if (normalized.mode === AUTHORIZATION_MODES.BUG_BOUNTY) {
+      if (!principal.user?.isPlatformOperator) {
+        return json(res, 403, { error: "OPERATOR_VERIFICATION_REQUIRED" });
+      }
+      if (!normalized.evidenceReference || !normalized.expiresAt) {
+        return json(res, 400, { error: "BUG_BOUNTY_EVIDENCE_REQUIRED" });
+      }
+    }
     const privileged =
       normalized.mode === AUTHORIZATION_MODES.CLIENT_AUTHORIZED ||
       normalized.allowedCapabilities.includes(CAPABILITIES.SOURCE_REMEDIATION);
@@ -426,6 +469,7 @@ export async function handleMilestoneHPlatformRoute({
       minimumRole: "ADMIN",
       apiScope: "targets:write",
     });
+    assertPrivilegedMfa(principal);
     const revoked = await revokeTargetAuthorization({
       workspaceId: match[1],
       targetId: match[2],
@@ -443,6 +487,7 @@ export async function handleMilestoneHPlatformRoute({
       minimumRole: "OPERATOR",
       apiScope: "targets:write",
     });
+    assertVerifiedEmail(principal);
     const center = await listTargetAuthorizationCenter({
       workspaceId: match[1],
       targetId: match[2],
@@ -450,6 +495,15 @@ export async function handleMilestoneHPlatformRoute({
     if (!center) return json(res, 404, { error: "TARGET_NOT_FOUND" });
     const authorization = await getCurrentAuthorization(match[2]);
     if (!authorization) return json(res, 409, { error: "AUTHORIZATION_REQUIRED" });
+    if (
+      authorization.mode !== AUTHORIZATION_MODES.BUG_BOUNTY &&
+      !(await hasVerifiedDomain({
+        workspaceId: match[1],
+        targetId: match[2],
+      }))
+    ) {
+      return json(res, 409, { error: "DOMAIN_VERIFICATION_REQUIRED" });
+    }
     const urlToTest = center.target.base_url;
     const jobs = {};
     if (authorization.allowedCapabilities.includes(CAPABILITIES.PUBLIC_HTTP_OBSERVE)) {
@@ -540,6 +594,7 @@ export async function handleMilestoneHPlatformRoute({
       minimumRole: "ADMIN",
       apiScope: "approvals:write",
     });
+    assertPrivilegedMfa(principal);
     if (principal.kind !== "SESSION") {
       return json(res, 403, { error: "SESSION_REQUIRED" });
     }
@@ -594,7 +649,16 @@ export async function handleMilestoneHPlatformRoute({
       minimumRole: "VIEWER",
       apiScope: "workspace:read",
     });
-    return json(res, 200, await getWorkspaceLaunchHealth(match[1]));
+    const health = await getWorkspaceLaunchHealth(match[1]);
+    const dependencyHealth = await getDependencyHealth();
+    if (dependencyHealth.enabled && dependencyHealth.status !== "HEALTHY") {
+      health.status = "ATTENTION";
+      health.issues = [...new Set([...(health.issues || []), "DEPENDENCY_HEALTH"])];
+    }
+    return json(res, 200, {
+      ...health,
+      dependencies: dependencyHealth,
+    });
   }
 
   match = url.pathname.match(

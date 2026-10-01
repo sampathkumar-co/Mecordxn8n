@@ -1,7 +1,8 @@
 import { api } from "./core/api.js";
 import {
   beginNavigation, currentWorkspace, isCurrentEpoch, markFetched,
-  setRailCollapsed, setToken, setWorkspace, state,
+  clearBrowserSession, setBrowserSession, setRailCollapsed, setToken,
+  setWorkspace, state,
 } from "./core/state.js";
 import { navigate, parseRoute, routeLabel, startRouter } from "./core/router.js";
 import { escapeHtml } from "./core/format.js";
@@ -104,7 +105,7 @@ function updateNavigation(route) {
   $("#breadcrumb").innerHTML = breadcrumbFor(route);
   document.title = `${routeLabel(route)} · Mecordxn8n`;
 
-  $("[data-link][data-area], [data-link][data-route-name]").forEach((node) => {
+  $$("[data-link][data-area], [data-link][data-route-name]").forEach((node) => {
     const nodePath = new URL(node.href, location.href).pathname.replace(/\/$/, "");
     const routePath = route.pathname.replace(/\/$/, "");
     const workspaceExact =
@@ -155,7 +156,7 @@ async function ensureSubscription(signal) {
 }
 
 async function renderRoute(route = parseRoute()) {
-  if (!state.token || !state.me) return;
+  if (!state.me) return;
   if (route.name === "not-found") {
     navigate("/console/home", { replace:true });
     return;
@@ -194,7 +195,6 @@ async function renderRoute(route = parseRoute()) {
 }
 
 async function boot() {
-  if (!state.token) return showAuth();
   try {
     state.me = await api("/v1/platform/me");
     const workspaces=state.me.workspaces||[];
@@ -209,31 +209,56 @@ async function boot() {
       await renderRoute(route);
     }
   } catch (error) {
-    if(error?.status===401) setToken("");
+    if(error?.status===401) clearBrowserSession();
     toast(error.message,true);
     showAuth();
   }
 }
 
-function signOut(notify=true){
-  const oldToken=state.token;
-  setToken("");
+async function signOut(notify=true){
+  try {
+    await api("/v1/platform/auth/logout", { method: "POST", body: "{}" });
+  } catch {
+    // Local session state is still cleared if the network is unavailable.
+  }
+  clearBrowserSession();
   state.me=null;state.subscription=null;state.cache.clear();
-  if(oldToken) fetch("/v1/platform/auth/logout",{method:"POST",headers:{Authorization:`Bearer ${oldToken}`}}).catch(()=>{});
   showAuth();
   if(notify)toast("Signed out");
 }
 
 function authPanel(name){
-  ["login-form","signup-form","bootstrap-form"].forEach((id)=>$("#"+id).classList.toggle("hidden",id!==name));
+  ["login-form","signup-form","bootstrap-form","forgot-password-form","reset-password-form"]
+    .forEach((id)=>$("#"+id).classList.toggle("hidden",id!==name));
 }
 
 $("#login-form").addEventListener("submit",async(event)=>{
   event.preventDefault();
+  const submit=$("#login-submit");
+  submit.disabled=true;
   try{
-    const result=await api("/v1/platform/auth/login",{method:"POST",body:JSON.stringify({email:$("#login-email").value,password:$("#login-password").value})});
-    setToken(result.token);await boot();
+    const result=await api("/v1/platform/auth/login",{method:"POST",body:JSON.stringify({
+      email:$("#login-email").value,
+      password:$("#login-password").value,
+      mfaCode:$("#login-mfa-row").classList.contains("hidden") ? null : $("#login-mfa-code").value,
+    })});
+    if(result.mfaRequired){
+      $("#login-mfa-row").classList.remove("hidden");
+      $("#login-mfa-code").required=true;
+      $("#login-mfa-code").focus();
+      submit.textContent="Verify and sign in";
+      toast("Enter your authenticator code or one-time recovery code.");
+      return;
+    }
+    setBrowserSession(result);
+    $("#login-mfa-row").classList.add("hidden");
+    $("#login-mfa-code").required=false;
+    $("#login-mfa-code").value="";
+    submit.textContent="Sign in";
+    if(result.recoveryCodeUsed) toast("Recovery code used. Store your remaining recovery codes safely.");
+    await boot();
   }catch(error){toast(error.message,true);}
+  finally{submit.disabled=false;}
 });
 
 $("#signup-form").addEventListener("submit",async(event)=>{
@@ -243,19 +268,31 @@ $("#signup-form").addEventListener("submit",async(event)=>{
       email:$("#signup-email").value,displayName:$("#signup-name").value,password:$("#signup-password").value,
       workspaceName:$("#signup-workspace").value,workspaceSlug:$("#signup-slug").value||$("#signup-workspace").value,
     })});
-    setToken(result.token);setWorkspace(result.workspace.id);await boot();navigate("/console/home",{replace:true});
+    setBrowserSession(result);
+    setWorkspace(result.workspace.id);
+    await boot();
+    navigate("/console/home",{replace:true});
+    if(result.emailVerification?.required){
+      toast(result.emailVerification.delivered
+        ? "Check your email to verify the account before running assessments."
+        : "Account created. Email verification delivery is not available yet.", !result.emailVerification.delivered);
+    }
   }catch(error){toast(error.message,true);}
 });
 
 $("#bootstrap-form").addEventListener("submit",async(event)=>{
   event.preventDefault();
   try{
-    const response=await fetch("/v1/platform/bootstrap",{method:"POST",headers:{"content-type":"application/json",Authorization:`Bearer ${$("#bootstrap-token").value}`},body:JSON.stringify({
+    const response=await fetch("/v1/platform/bootstrap",{method:"POST",headers:{
+      "content-type":"application/json",
+      "X-Mecord-Session-Mode":"cookie",
+      Authorization:`Bearer ${$("#bootstrap-token").value}`,
+    },body:JSON.stringify({
       email:$("#bootstrap-email").value,displayName:$("#bootstrap-name").value,password:$("#bootstrap-password").value,
       workspaceName:$("#bootstrap-workspace").value,workspaceSlug:$("#bootstrap-slug").value||$("#bootstrap-workspace").value,
     })});
     const payload=await response.json();if(!response.ok)throw new Error(payload.message||payload.error);
-    setToken(payload.token);setWorkspace(payload.workspace.id);await boot();navigate("/console/home",{replace:true});
+    setBrowserSession(payload);setWorkspace(payload.workspace.id);await boot();navigate("/console/home",{replace:true});
   }catch(error){toast(error.message,true);}
 });
 
@@ -263,6 +300,51 @@ $("#show-signup").addEventListener("click",()=>authPanel("signup-form"));
 $("#signup-back-login").addEventListener("click",()=>authPanel("login-form"));
 $("#show-bootstrap").addEventListener("click",()=>authPanel("bootstrap-form"));
 $("#show-login").addEventListener("click",()=>authPanel("login-form"));
+$("#show-forgot-password").addEventListener("click",()=>{
+  $("#forgot-password-email").value=$("#login-email").value;
+  authPanel("forgot-password-form");
+});
+$("#forgot-back-login").addEventListener("click",()=>authPanel("login-form"));
+$("#reset-back-login").addEventListener("click",()=>authPanel("login-form"));
+
+$("#forgot-password-form").addEventListener("submit",async(event)=>{
+  event.preventDefault();
+  const button=event.currentTarget.querySelector('button[type="submit"]');
+  button.disabled=true;
+  try{
+    await api("/v1/platform/auth/password-reset/request",{
+      method:"POST",
+      body:JSON.stringify({email:$("#forgot-password-email").value}),
+    });
+    toast("If that account exists, a password-reset link has been sent.");
+    authPanel("login-form");
+  }catch(error){toast(error.message,true);}
+  finally{button.disabled=false;}
+});
+
+let pendingResetToken="";
+$("#reset-password-form").addEventListener("submit",async(event)=>{
+  event.preventDefault();
+  const password=$("#reset-password-new").value;
+  if(password!==$("#reset-password-confirm").value){
+    toast("The passwords do not match.",true);
+    return;
+  }
+  const button=event.currentTarget.querySelector('button[type="submit"]');
+  button.disabled=true;
+  try{
+    await api("/v1/platform/auth/password-reset/confirm",{
+      method:"POST",
+      body:JSON.stringify({token:pendingResetToken,password}),
+    });
+    clearBrowserSession();
+    state.me=null;
+    pendingResetToken="";
+    toast("Password reset. Sign in with your new password.");
+    authPanel("login-form");
+  }catch(error){toast(error.message,true);}
+  finally{button.disabled=false;}
+});
 
 $("#workspace-select").addEventListener("change",async(event)=>{
   setWorkspace(event.target.value);
@@ -271,7 +353,7 @@ $("#workspace-select").addEventListener("change",async(event)=>{
 });
 
 $("#refresh-button").addEventListener("click",()=>renderRoute(state.route||parseRoute()));
-$("#logout-button").addEventListener("click",()=>signOut());
+$("#logout-button").addEventListener("click",()=>{ void signOut(); });
 $("#command-button").addEventListener("click",openCommandPalette);
 $("#command-sidebar").addEventListener("click",openCommandPalette);
 $("#mobile-menu").addEventListener("click",()=>sidebar.classList.toggle("mobile-open"));
@@ -283,7 +365,17 @@ document.addEventListener("mecord:navigate",(event)=>renderRoute(event.detail));
 document.addEventListener("mecord:refresh",()=>renderRoute(state.route||parseRoute()));
 document.addEventListener("mecord:create-target",openTargetForm);
 document.addEventListener("mecord:connection",(event)=>setConnection(event.detail.status));
-document.addEventListener("mecord:auth-expired",()=>signOut(false));
+document.addEventListener("mecord:auth-expired",()=>{ void signOut(false); });
+document.addEventListener("mecord:security-action-required",(event)=>{
+  const code=event.detail?.code;
+  const messages={
+    EMAIL_VERIFICATION_REQUIRED:"Verify your email before running or approving protected actions.",
+    MFA_ENROLLMENT_REQUIRED:"Enable multi-factor authentication before this protected action.",
+    MFA_STEP_UP_REQUIRED:"Verify MFA again before this protected action.",
+  };
+  toast(messages[code]||"Additional account verification is required.",true);
+  navigate("/console/workspace/access");
+});
 
 let pendingG=false;
 document.addEventListener("keydown",(event)=>{
@@ -304,5 +396,34 @@ document.addEventListener("keydown",(event)=>{
   if(path){event.preventDefault();navigate(path);}
 });
 
+async function handleAuthActionLink(){
+  const params=new URLSearchParams(location.search);
+  const verificationToken=params.get("verify_email");
+  const resetToken=params.get("reset_password");
+  if(verificationToken){
+    try{
+      await api("/v1/platform/auth/verify-email",{
+        method:"POST",
+        body:JSON.stringify({token:verificationToken}),
+      });
+      toast("Email verified. Your account can now run authorized assessments.");
+    }catch(error){toast(error.message,true);}
+    params.delete("verify_email");
+    history.replaceState({}, "", location.pathname + (params.toString() ? "?" + params : ""));
+  }
+  if(resetToken){
+    pendingResetToken=resetToken;
+    params.delete("reset_password");
+    history.replaceState({}, "", location.pathname + (params.toString() ? "?" + params : ""));
+    showAuth();
+    authPanel("reset-password-form");
+    $("#reset-password-new").focus();
+    return true;
+  }
+  return false;
+}
+
 startRouter();
-boot();
+handleAuthActionLink().then((recoveryActive)=>{
+  if(!recoveryActive) void boot();
+});

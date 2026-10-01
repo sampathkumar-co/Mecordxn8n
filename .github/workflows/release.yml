@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - "build/**"
+      - "hardening/**"
       - main
   pull_request:
     branches:
@@ -12,6 +13,9 @@ on:
 
 permissions:
   contents: read
+  id-token: write
+  attestations: write
+  artifact-metadata: write
 
 jobs:
   certify:
@@ -35,17 +39,31 @@ jobs:
       RESTORE_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/mecordxn8n_restore
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
       PLATFORM_MASTER_KEY: release-gate-master-key-must-be-at-least-32-characters
+      PLATFORM_AUTH_KEY: release-gate-auth-key-must-be-at-least-32-characters
       BOOTSTRAP_TOKEN: release-gate-bootstrap-token-with-32-characters
       POSTGRES_DB: mecordxn8n_release
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: release-gate-postgres-password-with-32-characters
+      N8N_POSTGRES_DB: n8n_release
+      N8N_POSTGRES_USER: n8n_release
+      N8N_POSTGRES_PASSWORD: release-gate-n8n-postgres-password-unique-32chars
+      N8N_DATABASE_URL: postgres://n8n_release:release-gate-n8n-postgres-password-unique-32chars@127.0.0.1:5432/n8n_release
       ORCHESTRATOR_TOKEN: release-gate-orchestrator-token-with-32-characters
-      WORKER_TOKEN: release-gate-worker-token-with-at-least-32-characters
+      WORKER_TOKEN_HTTP_OBSERVER: release-http-observer-worker-token-00000001
+      WORKER_TOKEN_BROWSER_QA: release-browser-qa-worker-token-00000000002
+      WORKER_TOKEN_SITE_DISCOVERY: release-site-discovery-worker-token-0000003
+      WORKER_TOKEN_JOURNEY_QA: release-journey-qa-worker-token-00000000004
+      WORKER_TOKEN_FINDING_VERIFICATION: release-verification-worker-token-000000005
+      WORKER_TOKEN_REMEDIATION: release-remediation-worker-token-00000000006
+      WORKER_TOKEN_INTEGRATION: release-integration-worker-token-000000000007
       WORKER_TRIGGER_TOKEN: release-gate-trigger-token-with-at-least-32-characters
       N8N_ENCRYPTION_KEY: release-gate-n8n-key-with-at-least-32-characters
+      BACKUP_ENCRYPTION_KEY: release-gate-backup-encryption-key-00000000001
       APP_DOMAIN: app.example.test
       ACME_EMAIL: ops@example.test
       PUBLIC_APP_URL: https://app.example.test
+      AUTH_MAIL_WEBHOOK_URL: https://mailer.example.test/mecord-auth
+      AUTH_MAIL_WEBHOOK_SECRET: release-gate-auth-mail-secret-with-at-least-32-chars
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -53,6 +71,10 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Generate CycloneDX SBOM
+        run: |
+          mkdir -p artifacts
+          npm sbom --sbom-format cyclonedx > artifacts/sbom.cdx.json
       - run: npm run migrate
       - run: npm run check
       - name: Synthetic benchmark
@@ -78,8 +100,27 @@ jobs:
         run: createdb -h 127.0.0.1 -U postgres mecordxn8n_restore
       - name: Restore verification
         run: node scripts/restore-verify.mjs artifacts/database.backup
+      - name: Evidence backup and restore verification
+        run: |
+          node - <<'NODE'
+          const fs = require("node:fs");
+          const crypto = require("node:crypto");
+          const bytes = Buffer.from("release-gate-content-addressed-evidence\n");
+          const sha = crypto.createHash("sha256").update(bytes).digest("hex");
+          const file = "artifacts/evidence-store/" + sha.slice(0,2) + "/" + sha.slice(2,4) + "/" + sha;
+          fs.mkdirSync(require("node:path").dirname(file), { recursive: true });
+          fs.writeFileSync(file, bytes);
+          NODE
+          EVIDENCE_STORE_DIR="$PWD/artifacts/evidence-store" node scripts/backup-evidence.mjs "$PWD/artifacts/evidence-store" "$PWD/artifacts/evidence-backup"
+          node scripts/verify-evidence-backup.mjs "$PWD/artifacts/evidence-backup"
       - name: Production preflight
-        run: node scripts/production-preflight.mjs
+        env:
+          DEPENDENCY_HEALTH_ENABLED: "true"
+          MECORD_MCP_URL: https://mecord.example.test/mcp
+          MECORD_MCP_TOKEN: ${{ env.ORCHESTRATOR_TOKEN }}
+          MECORD_HEALTH_URL: https://mecord.example.test/healthz
+          N8N_HEALTH_URL: http://n8n:5678/healthz
+        run: NODE_BASE_IMAGE=node:22-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa PLAYWRIGHT_BASE_IMAGE=mcr.microsoft.com/playwright:v1.63.0-noble@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa POSTGRES_IMAGE=postgres:17-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa N8N_IMAGE=docker.n8n.io/n8nio/n8n:2.40.7@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa CADDY_IMAGE=caddy:2.10-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa REQUIRE_PRIVILEGED_MFA=true REQUIRE_VERIFIED_EMAIL=true MFA_STEP_UP_MINUTES=30 node scripts/production-preflight.mjs
       - name: Release certification
         run: node scripts/release-certify.mjs
       - name: Validate Caddy ingress
@@ -98,9 +139,22 @@ jobs:
         run: |
           docker build -t mecordxn8n-control:release .
           docker build -f Dockerfile.browser -t mecordxn8n-browser:release .
+      - name: Attest release certification provenance
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            artifacts/release-certification.json
+            artifacts/sbom.cdx.json
+            artifacts/database.backup.json
+            artifacts/evidence-backup/manifest.json
+      - name: Verify generated SBOM is valid JSON
+        run: node -e "JSON.parse(require('node:fs').readFileSync('artifacts/sbom.cdx.json','utf8'))"
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: release-certification
           path: |
             artifacts/release-certification.json
             artifacts/database.backup.json
+            artifacts/evidence-backup/manifest.json
+            artifacts/sbom.cdx.json

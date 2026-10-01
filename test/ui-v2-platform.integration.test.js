@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 
 process.env.PLATFORM_MASTER_KEY ||= "ui-v2-platform-master-key-that-is-long-enough";
+process.env.TRUST_PROXY_HEADERS = "true";
 
 import { createServer } from "../src/server.js";
 import { closePool, pool } from "../src/repository.js";
@@ -35,12 +36,18 @@ after(async () => {
   if (enabled) await closePool();
 });
 
-async function request(path, { method = "GET", body, token } = {}) {
+async function request(path, {
+  method = "GET",
+  body,
+  token,
+  headers = {},
+} = {}) {
   const response = await fetch(baseUrl + path, {
     method,
     headers: {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(body !== undefined ? { "content-type": "application/json" } : {}),
+      ...headers,
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
@@ -50,10 +57,14 @@ async function request(path, { method = "GET", body, token } = {}) {
   };
 }
 
+let signupAddress = 10;
+
 async function signup(prefix) {
   const suffix = randomUUID().slice(0, 8);
+  const forwarded = `198.51.100.${signupAddress++}`;
   const response = await request("/v1/platform/auth/signup", {
     method: "POST",
+    headers: { "x-forwarded-for": forwarded },
     body: {
       email: `${prefix}-${suffix}@example.test`,
       displayName: "UI V2 Owner",

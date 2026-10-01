@@ -105,7 +105,7 @@ function updateNavigation(route) {
   $("#breadcrumb").innerHTML = breadcrumbFor(route);
   document.title = `${routeLabel(route)} · Mecordxn8n`;
 
-  $("[data-link][data-area], [data-link][data-route-name]").forEach((node) => {
+  $$("[data-link][data-area], [data-link][data-route-name]").forEach((node) => {
     const nodePath = new URL(node.href, location.href).pathname.replace(/\/$/, "");
     const routePath = route.pathname.replace(/\/$/, "");
     const workspaceExact =

@@ -1,5 +1,8 @@
 export const state = {
+  // Legacy bearer sessions are read for seamless rc.5 upgrades only.
+  // New browser logins use an HttpOnly cookie and do not persist the bearer.
   token: sessionStorage.getItem("mecord_session") || "",
+  csrfToken: sessionStorage.getItem("mecord_csrf") || "",
   me: null,
   workspaceId: sessionStorage.getItem("mecord_workspace") || "",
   subscription: null,
@@ -19,6 +22,20 @@ export function setToken(token) {
   state.token = token || "";
   if (state.token) sessionStorage.setItem("mecord_session", state.token);
   else sessionStorage.removeItem("mecord_session");
+}
+
+export function setBrowserSession(session) {
+  state.token = "";
+  sessionStorage.removeItem("mecord_session");
+  state.csrfToken = String(session?.csrfToken || "");
+  if (state.csrfToken) sessionStorage.setItem("mecord_csrf", state.csrfToken);
+  else sessionStorage.removeItem("mecord_csrf");
+}
+
+export function clearBrowserSession() {
+  setToken("");
+  state.csrfToken = "";
+  sessionStorage.removeItem("mecord_csrf");
 }
 
 export function setWorkspace(id) {

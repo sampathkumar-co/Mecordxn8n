@@ -3,8 +3,17 @@ const required = [
   "POSTGRES_DB",
   "POSTGRES_USER",
   "POSTGRES_PASSWORD",
+  "N8N_POSTGRES_DB",
+  "N8N_POSTGRES_USER",
+  "N8N_POSTGRES_PASSWORD",
   "ORCHESTRATOR_TOKEN",
-  "WORKER_TOKEN",
+  "WORKER_TOKEN_HTTP_OBSERVER",
+  "WORKER_TOKEN_BROWSER_QA",
+  "WORKER_TOKEN_SITE_DISCOVERY",
+  "WORKER_TOKEN_JOURNEY_QA",
+  "WORKER_TOKEN_FINDING_VERIFICATION",
+  "WORKER_TOKEN_REMEDIATION",
+  "WORKER_TOKEN_INTEGRATION",
   "WORKER_TRIGGER_TOKEN",
   "N8N_ENCRYPTION_KEY",
   "PLATFORM_MASTER_KEY",
@@ -27,8 +36,15 @@ for (const name of required) {
 
 for (const name of [
   "POSTGRES_PASSWORD",
+  "N8N_POSTGRES_PASSWORD",
   "ORCHESTRATOR_TOKEN",
-  "WORKER_TOKEN",
+  "WORKER_TOKEN_HTTP_OBSERVER",
+  "WORKER_TOKEN_BROWSER_QA",
+  "WORKER_TOKEN_SITE_DISCOVERY",
+  "WORKER_TOKEN_JOURNEY_QA",
+  "WORKER_TOKEN_FINDING_VERIFICATION",
+  "WORKER_TOKEN_REMEDIATION",
+  "WORKER_TOKEN_INTEGRATION",
   "WORKER_TRIGGER_TOKEN",
   "N8N_ENCRYPTION_KEY",
   "PLATFORM_MASTER_KEY",
@@ -37,6 +53,41 @@ for (const name of [
   if (values[name] && values[name].length < 32) {
     errors.push(name + " must be at least 32 characters");
   }
+}
+
+const workerTokenNames = [
+  "WORKER_TOKEN_HTTP_OBSERVER",
+  "WORKER_TOKEN_BROWSER_QA",
+  "WORKER_TOKEN_SITE_DISCOVERY",
+  "WORKER_TOKEN_JOURNEY_QA",
+  "WORKER_TOKEN_FINDING_VERIFICATION",
+  "WORKER_TOKEN_REMEDIATION",
+  "WORKER_TOKEN_INTEGRATION",
+];
+const workerTokens = workerTokenNames.map((name) => values[name]).filter(Boolean);
+if (new Set(workerTokens).size !== workerTokens.length) {
+  errors.push("every worker token must be unique");
+}
+if (
+  values.POSTGRES_PASSWORD &&
+  values.N8N_POSTGRES_PASSWORD &&
+  values.POSTGRES_PASSWORD === values.N8N_POSTGRES_PASSWORD
+) {
+  errors.push("n8n must not reuse the application PostgreSQL password");
+}
+if (
+  values.POSTGRES_DB === values.N8N_POSTGRES_DB &&
+  values.POSTGRES_USER === values.N8N_POSTGRES_USER
+) {
+  errors.push("n8n must use a separate PostgreSQL database/user");
+}
+const controlSecrets = [
+  values.ORCHESTRATOR_TOKEN,
+  values.WORKER_TRIGGER_TOKEN,
+  ...workerTokens,
+].filter(Boolean);
+if (new Set(controlSecrets).size !== controlSecrets.length) {
+  errors.push("orchestrator, trigger and worker credentials must all be distinct");
 }
 
 if (values.PUBLIC_APP_URL) {

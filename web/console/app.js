@@ -366,6 +366,16 @@ document.addEventListener("mecord:refresh",()=>renderRoute(state.route||parseRou
 document.addEventListener("mecord:create-target",openTargetForm);
 document.addEventListener("mecord:connection",(event)=>setConnection(event.detail.status));
 document.addEventListener("mecord:auth-expired",()=>{ void signOut(false); });
+document.addEventListener("mecord:security-action-required",(event)=>{
+  const code=event.detail?.code;
+  const messages={
+    EMAIL_VERIFICATION_REQUIRED:"Verify your email before running or approving protected actions.",
+    MFA_ENROLLMENT_REQUIRED:"Enable multi-factor authentication before this protected action.",
+    MFA_STEP_UP_REQUIRED:"Verify MFA again before this protected action.",
+  };
+  toast(messages[code]||"Additional account verification is required.",true);
+  navigate("/console/workspace/access");
+});
 
 let pendingG=false;
 document.addEventListener("keydown",(event)=>{

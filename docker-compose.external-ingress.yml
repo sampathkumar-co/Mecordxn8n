@@ -1,0 +1,11 @@
+services:
+  control-api:
+    networks:
+      external-ingress:
+        aliases:
+          - ${EXTERNAL_INGRESS_ALIAS:-mecordxn8n-control}
+
+networks:
+  external-ingress:
+    external: true
+    name: ${EXTERNAL_INGRESS_NETWORK}

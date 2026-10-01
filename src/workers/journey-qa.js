@@ -7,6 +7,7 @@ import {
   leaseJob,
   recordFinding,
   recordJourneyRun,
+  uploadEvidenceArtifact,
 } from "./control-client.js";
 
 function fingerprint(parts) {
@@ -57,6 +58,15 @@ export async function runJourneyQaOnce({
         viewport: rawStep.viewport === "mobile" ? "mobile" : "desktop",
         artifactName: `${job.id}-journey-${results.length + 1}`,
       });
+      if (observation.artifact) {
+        observation.artifact = await uploadEvidenceArtifact({
+          controlApiUrl,
+          workerToken,
+          workerId,
+          jobId: job.id,
+          artifact: observation.artifact,
+        });
+      }
 
       const titleExpected = rawStep.expectTitleIncludes
         ? String(rawStep.expectTitleIncludes)

@@ -39,8 +39,17 @@ jobs:
       POSTGRES_DB: mecordxn8n_release
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: release-gate-postgres-password-with-32-characters
+      N8N_POSTGRES_DB: n8n_release
+      N8N_POSTGRES_USER: n8n_release
+      N8N_POSTGRES_PASSWORD: release-gate-n8n-postgres-password-unique-32chars
       ORCHESTRATOR_TOKEN: release-gate-orchestrator-token-with-32-characters
-      WORKER_TOKEN: release-gate-worker-token-with-at-least-32-characters
+      WORKER_TOKEN_HTTP_OBSERVER: release-http-observer-worker-token-00000001
+      WORKER_TOKEN_BROWSER_QA: release-browser-qa-worker-token-00000000002
+      WORKER_TOKEN_SITE_DISCOVERY: release-site-discovery-worker-token-0000003
+      WORKER_TOKEN_JOURNEY_QA: release-journey-qa-worker-token-00000000004
+      WORKER_TOKEN_FINDING_VERIFICATION: release-verification-worker-token-000000005
+      WORKER_TOKEN_REMEDIATION: release-remediation-worker-token-00000000006
+      WORKER_TOKEN_INTEGRATION: release-integration-worker-token-000000000007
       WORKER_TRIGGER_TOKEN: release-gate-trigger-token-with-at-least-32-characters
       N8N_ENCRYPTION_KEY: release-gate-n8n-key-with-at-least-32-characters
       APP_DOMAIN: app.example.test

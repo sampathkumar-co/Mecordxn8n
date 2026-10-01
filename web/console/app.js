@@ -1,7 +1,8 @@
 import { api } from "./core/api.js";
 import {
   beginNavigation, currentWorkspace, isCurrentEpoch, markFetched,
-  setRailCollapsed, setToken, setWorkspace, state,
+  clearBrowserSession, setBrowserSession, setRailCollapsed, setToken,
+  setWorkspace, state,
 } from "./core/state.js";
 import { navigate, parseRoute, routeLabel, startRouter } from "./core/router.js";
 import { escapeHtml } from "./core/format.js";
@@ -194,7 +195,6 @@ async function renderRoute(route = parseRoute()) {
 }
 
 async function boot() {
-  if (!state.token) return showAuth();
   try {
     state.me = await api("/v1/platform/me");
     const workspaces=state.me.workspaces||[];
@@ -209,17 +209,20 @@ async function boot() {
       await renderRoute(route);
     }
   } catch (error) {
-    if(error?.status===401) setToken("");
+    if(error?.status===401) clearBrowserSession();
     toast(error.message,true);
     showAuth();
   }
 }
 
-function signOut(notify=true){
-  const oldToken=state.token;
-  setToken("");
+async function signOut(notify=true){
+  try {
+    await api("/v1/platform/auth/logout", { method: "POST", body: "{}" });
+  } catch {
+    // Local session state is still cleared if the network is unavailable.
+  }
+  clearBrowserSession();
   state.me=null;state.subscription=null;state.cache.clear();
-  if(oldToken) fetch("/v1/platform/auth/logout",{method:"POST",headers:{Authorization:`Bearer ${oldToken}`}}).catch(()=>{});
   showAuth();
   if(notify)toast("Signed out");
 }
@@ -232,7 +235,7 @@ $("#login-form").addEventListener("submit",async(event)=>{
   event.preventDefault();
   try{
     const result=await api("/v1/platform/auth/login",{method:"POST",body:JSON.stringify({email:$("#login-email").value,password:$("#login-password").value})});
-    setToken(result.token);await boot();
+    setBrowserSession(result);await boot();
   }catch(error){toast(error.message,true);}
 });
 
@@ -243,7 +246,7 @@ $("#signup-form").addEventListener("submit",async(event)=>{
       email:$("#signup-email").value,displayName:$("#signup-name").value,password:$("#signup-password").value,
       workspaceName:$("#signup-workspace").value,workspaceSlug:$("#signup-slug").value||$("#signup-workspace").value,
     })});
-    setToken(result.token);setWorkspace(result.workspace.id);await boot();navigate("/console/home",{replace:true});
+    setBrowserSession(result);setWorkspace(result.workspace.id);await boot();navigate("/console/home",{replace:true});
   }catch(error){toast(error.message,true);}
 });
 
@@ -255,7 +258,7 @@ $("#bootstrap-form").addEventListener("submit",async(event)=>{
       workspaceName:$("#bootstrap-workspace").value,workspaceSlug:$("#bootstrap-slug").value||$("#bootstrap-workspace").value,
     })});
     const payload=await response.json();if(!response.ok)throw new Error(payload.message||payload.error);
-    setToken(payload.token);setWorkspace(payload.workspace.id);await boot();navigate("/console/home",{replace:true});
+    setBrowserSession(payload);setWorkspace(payload.workspace.id);await boot();navigate("/console/home",{replace:true});
   }catch(error){toast(error.message,true);}
 });
 
@@ -271,7 +274,7 @@ $("#workspace-select").addEventListener("change",async(event)=>{
 });
 
 $("#refresh-button").addEventListener("click",()=>renderRoute(state.route||parseRoute()));
-$("#logout-button").addEventListener("click",()=>signOut());
+$("#logout-button").addEventListener("click",()=>{ void signOut(); });
 $("#command-button").addEventListener("click",openCommandPalette);
 $("#command-sidebar").addEventListener("click",openCommandPalette);
 $("#mobile-menu").addEventListener("click",()=>sidebar.classList.toggle("mobile-open"));
@@ -283,7 +286,7 @@ document.addEventListener("mecord:navigate",(event)=>renderRoute(event.detail));
 document.addEventListener("mecord:refresh",()=>renderRoute(state.route||parseRoute()));
 document.addEventListener("mecord:create-target",openTargetForm);
 document.addEventListener("mecord:connection",(event)=>setConnection(event.detail.status));
-document.addEventListener("mecord:auth-expired",()=>signOut(false));
+document.addEventListener("mecord:auth-expired",()=>{ void signOut(false); });
 
 let pendingG=false;
 document.addEventListener("keydown",(event)=>{

@@ -57,6 +57,10 @@ import {
   dispatchWorkerOnce,
   knownDispatchWorker,
 } from "./orchestration/dispatch.js";
+import {
+  MAX_EVIDENCE_BYTES,
+  storeWorkerEvidence,
+} from "./evidence-store.js";
 
 const MAX_BODY_BYTES = 256 * 1024;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -468,6 +472,27 @@ export function createServer({
           assertWorkerBody(workerPrincipal, await readJson(request));
       } else if (!requireBearer(req, orchestratorToken)) {
         return json(res, 401, { error: "UNAUTHORIZED" });
+      }
+
+      const evidenceMatch = url.pathname.match(
+        /^\/v1\/worker\/evidence\/([0-9a-f-]+)$/i,
+      );
+      if (req.method === "POST" && evidenceMatch) {
+        const requestedWorkerId = String(req.headers["x-worker-id"] || "").trim();
+        const workerId = workerPrincipal?.workerId || requestedWorkerId;
+        if (!workerId) {
+          return json(res, 400, { error: "WORKER_ID_REQUIRED" });
+        }
+        assertWorkerBody(workerPrincipal, { workerId });
+        const bytes = await readRaw(req, MAX_EVIDENCE_BYTES);
+        const artifact = await storeWorkerEvidence({
+          jobId: evidenceMatch[1],
+          workerId,
+          expectedSha256: req.headers["x-evidence-sha256"],
+          bytes,
+          contentType: req.headers["content-type"],
+        });
+        return json(res, 201, artifact);
       }
 
       const dispatchMatch = url.pathname.match(

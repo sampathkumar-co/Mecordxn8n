@@ -153,6 +153,7 @@ async function renderAccess({ content, signal, wid, workspace, section }) {
     recoveryCodesRemaining: 0,
     sessionVerifiedAt: state.me?.principal?.mfa?.verifiedAt || null,
   };
+  const emailVerified = Boolean(state.me?.principal?.user?.emailVerified);
   const adminAccess = permission("ADMIN");
   const ownerAccess = permission("OWNER");
 
@@ -168,12 +169,14 @@ async function renderAccess({ content, signal, wid, workspace, section }) {
       <div class="stack">
         ${panel("Account security", `<div class="panel-body">
           <div class="detail-grid">
+            ${detail("Email verification", emailVerified ? "VERIFIED" : "REQUIRED")}
             ${detail("Multi-factor authentication", mfa.enabled ? "ENABLED" : mfa.pending ? "PENDING CONFIRMATION" : "DISABLED")}
             ${detail("Recovery codes remaining", mfa.enabled ? mfa.recoveryCodesRemaining : "—")}
             ${detail("Current session MFA", mfa.sessionVerifiedAt ? `VERIFIED · ${fmtRelative(mfa.sessionVerifiedAt)}` : "NOT VERIFIED")}
             ${detail("Session protection", "HttpOnly + SameSite=Strict + CSRF")}
           </div>
           <div class="filters mt-12">
+            ${!emailVerified ? '<button id="email-verification-resend" class="button small" type="button">Resend verification email</button>' : ""}
             ${mfa.enabled
               ? '<button id="mfa-stepup" class="button small primary" type="button">Verify step-up</button><button id="mfa-disable" class="button danger small" type="button">Disable MFA</button>'
               : '<button id="mfa-enable" class="button primary small" type="button">Enable MFA</button>'}
@@ -221,6 +224,21 @@ async function renderAccess({ content, signal, wid, workspace, section }) {
 
   $("#workspace-invite")?.addEventListener("click", openInviteForm);
   $("#workspace-key")?.addEventListener("click", openApiKeyForm);
+  $("#email-verification-resend")?.addEventListener("click", async (event) => {
+    const button=event.currentTarget;
+    button.disabled=true;
+    try {
+      await api("/v1/platform/email-verification/resend", {
+        method:"POST",
+        body:"{}",
+      });
+      toast("Verification email sent.");
+    } catch (error) {
+      toast(error.message,true);
+    } finally {
+      button.disabled=false;
+    }
+  });
   $("#mfa-enable")?.addEventListener("click", openMfaEnrollment);
   $("#mfa-stepup")?.addEventListener("click", openMfaStepUp);
   $("#mfa-disable")?.addEventListener("click", openMfaDisable);

@@ -86,6 +86,9 @@ services:
       STRIPE_PRICE_TEAM: ${STRIPE_PRICE_TEAM:-}
       STRIPE_PRICE_BUSINESS: ${STRIPE_PRICE_BUSINESS:-}
       STRIPE_PRICE_ENTERPRISE: ${STRIPE_PRICE_ENTERPRISE:-}
+      EVIDENCE_STORE_DIR: /evidence
+    volumes:
+      - evidence_store:/evidence
     depends_on:
       postgres:
         condition: service_healthy
@@ -141,13 +144,11 @@ services:
       WORKER_TRIGGER_TOKEN: ${WORKER_TRIGGER_TOKEN}
       WORKER_ID: browser-qa-worker
       WORKER_PORT: 8091
-      ARTIFACT_DIR: /artifacts
+      ARTIFACT_DIR: /tmp/artifacts
     depends_on:
       control-api:
         condition: service_started
     command: node src/workers/browser-qa-service.js
-    volumes:
-      - browser_artifacts:/artifacts
     networks:
       - browser-qa-net
 
@@ -166,13 +167,11 @@ services:
       WORKER_TRIGGER_TOKEN: ${WORKER_TRIGGER_TOKEN}
       WORKER_ID: site-discovery-worker
       WORKER_PORT: 8092
-      ARTIFACT_DIR: /artifacts
+      ARTIFACT_DIR: /tmp/artifacts
     depends_on:
       control-api:
         condition: service_started
     command: node src/workers/site-discovery-service.js
-    volumes:
-      - discovery_artifacts:/artifacts
     networks:
       - site-discovery-net
 
@@ -191,13 +190,11 @@ services:
       WORKER_TRIGGER_TOKEN: ${WORKER_TRIGGER_TOKEN}
       WORKER_ID: journey-qa-worker
       WORKER_PORT: 8093
-      ARTIFACT_DIR: /artifacts
+      ARTIFACT_DIR: /tmp/artifacts
     depends_on:
       control-api:
         condition: service_started
     command: node src/workers/journey-qa-service.js
-    volumes:
-      - journey_artifacts:/artifacts
     networks:
       - journey-qa-net
 
@@ -216,13 +213,11 @@ services:
       WORKER_TRIGGER_TOKEN: ${WORKER_TRIGGER_TOKEN}
       WORKER_ID: finding-verification-worker
       WORKER_PORT: 8094
-      ARTIFACT_DIR: /artifacts
+      ARTIFACT_DIR: /tmp/artifacts
     depends_on:
       control-api:
         condition: service_started
     command: node src/workers/finding-verification-service.js
-    volumes:
-      - verification_artifacts:/artifacts
     networks:
       - verification-net
 
@@ -306,10 +301,7 @@ volumes:
   postgres_data:
   n8n_postgres_data:
   n8n_data:
-  browser_artifacts:
-  discovery_artifacts:
-  journey_artifacts:
-  verification_artifacts:
+  evidence_store:
 
 networks:
   edge:

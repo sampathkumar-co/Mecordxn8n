@@ -5,7 +5,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { CAPABILITIES, authorize } from "../src/authorization.js";
+import { CAPABILITIES, assertAuthorized } from "../src/authorization.js";
 import { verifyEvidenceReference } from "../src/evidence-store.js";
 import {
   closePool,
@@ -107,7 +107,7 @@ test(
     assert.equal(target.status, 201);
 
     const authorization = await getCurrentAuthorization(target.body.id);
-    const decision = authorize({
+    const decision = assertAuthorized({
       authorization,
       requestedCapability: CAPABILITIES.BROWSER_QA,
       requestedUrl: target.body.baseUrl,

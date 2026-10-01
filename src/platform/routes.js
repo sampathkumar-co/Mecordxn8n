@@ -78,6 +78,14 @@ function validId(value) {
   return UUID_RE.test(String(value || ""));
 }
 
+function browserSessionResponse(req, result) {
+  if (String(req.headers["x-mecord-session-mode"] || "").toLowerCase() !== "cookie") {
+    return result;
+  }
+  const { token: _token, ...safe } = result;
+  return safe;
+}
+
 function publicClientAddress(req) {
   const direct = String(req.socket?.remoteAddress || "unknown").trim();
   if (String(process.env.TRUST_PROXY_HEADERS || "").toLowerCase() !== "true") {
@@ -305,7 +313,7 @@ export async function handlePlatformPublicRoute({
       userAgent: req.headers["user-agent"] || "",
     });
     setPlatformSessionCookie(res, result.token, result.expiresAt);
-    return json(res, 201, result);
+    return json(res, 201, browserSessionResponse(req, result));
   }
 
   if (req.method === "POST" && url.pathname === "/v1/platform/auth/login") {
@@ -325,7 +333,7 @@ export async function handlePlatformPublicRoute({
     });
     if (!result) return json(res, 401, { error: "INVALID_CREDENTIALS" });
     setPlatformSessionCookie(res, result.token, result.expiresAt);
-    return json(res, 200, result);
+    return json(res, 200, browserSessionResponse(req, result));
   }
 
   if (
@@ -353,7 +361,7 @@ export async function handlePlatformPublicRoute({
       return json(res, 401, { error: "INVALID_OR_EXPIRED_INVITE" });
     }
     setPlatformSessionCookie(res, result.token, result.expiresAt);
-    return json(res, 200, result);
+    return json(res, 200, browserSessionResponse(req, result));
   }
 
   return false;
@@ -735,7 +743,7 @@ export async function handlePlatformRoute({
         badRequest,
       ),
     });
-    return json(res, 200, result);
+    return json(res, 200, browserSessionResponse(req, result));
   }
 
   match = url.pathname.match(

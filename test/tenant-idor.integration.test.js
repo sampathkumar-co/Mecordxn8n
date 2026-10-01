@@ -47,14 +47,18 @@ async function request(path, { method = "GET", token, body } = {}) {
 
 async function signup(label) {
   const suffix = randomUUID().slice(0, 8);
+  const safe = label
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
   const response = await request("/v1/platform/auth/signup", {
     method: "POST",
     body: {
-      email: `${label}-${suffix}@example.test`,
+      email: `${safe}-${suffix}@example.test`,
       displayName: label,
       password: "Tenant-IDOR-Password-12345",
       workspaceName: `${label} ${suffix}`,
-      workspaceSlug: `${label.toLowerCase()}-${suffix}`,
+      workspaceSlug: `${safe}-${suffix}`,
     },
   });
   assert.equal(response.status, 201);
@@ -135,7 +139,7 @@ test(
     let verificationId = verification.rows[0]?.id;
     if (!verificationId) {
       const authorization = await pool.query(
-        `SELECT id FROM authorization_records
+        `SELECT id FROM authorizations
           WHERE target_id = $1
           ORDER BY created_at DESC
           LIMIT 1`,

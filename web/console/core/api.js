@@ -32,6 +32,9 @@ export async function api(path, options = {}) {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const headers = new Headers(options.headers || {});
     if (state.token) headers.set("Authorization", `Bearer ${state.token}`);
+    if (!retryable && state.csrfToken) {
+      headers.set("X-CSRF-Token", state.csrfToken);
+    }
     if (options.body && !headers.has("content-type")) headers.set("content-type", "application/json");
 
     let response;
@@ -39,6 +42,7 @@ export async function api(path, options = {}) {
       response = await fetch(path, {
         ...options,
         headers,
+        credentials: "same-origin",
         signal: requestSignal(options.signal, options.timeoutMs || 15000),
       });
     } catch (error) {

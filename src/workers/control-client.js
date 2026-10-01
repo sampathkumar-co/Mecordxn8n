@@ -1,3 +1,5 @@
+import fs from "node:fs/promises";
+
 export async function workerApiRequest(baseUrl, workerToken, path, body) {
   const response = await fetch(`${baseUrl}${path}`, {
     method: "POST",
@@ -19,6 +21,51 @@ export async function workerApiRequest(baseUrl, workerToken, path, body) {
   }
 
   return payload;
+}
+
+export async function uploadEvidenceArtifact({
+  controlApiUrl,
+  workerToken,
+  workerId,
+  jobId,
+  artifact,
+}) {
+  if (!artifact?.path || !artifact?.sha256) return artifact || null;
+  const bytes = await fs.readFile(artifact.path);
+  const contentType = artifact.contentType ||
+    (String(artifact.path).toLowerCase().endsWith(".png")
+      ? "image/png"
+      : "application/octet-stream");
+  const response = await fetch(
+    `${controlApiUrl}/v1/worker/evidence/${jobId}`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${workerToken}`,
+        "content-type": contentType,
+        "x-worker-id": workerId,
+        "x-evidence-sha256": artifact.sha256,
+      },
+      body: bytes,
+    },
+  );
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(`control API returned ${response.status}`);
+    error.code = payload?.error || "EVIDENCE_UPLOAD_FAILED";
+    error.payload = payload;
+    throw error;
+  }
+  await fs.rm(artifact.path, { force: true }).catch(() => {});
+  return {
+    type: artifact.type || "artifact",
+    kind: artifact.kind || artifact.type || "artifact",
+    path: payload.path,
+    sha256: payload.sha256,
+    byteLength: payload.byteLength,
+    immutable: true,
+    contentType,
+  };
 }
 
 export async function leaseJob({

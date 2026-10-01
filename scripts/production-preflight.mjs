@@ -1,4 +1,9 @@
 const required = [
+  "NODE_BASE_IMAGE",
+  "PLAYWRIGHT_BASE_IMAGE",
+  "POSTGRES_IMAGE",
+  "N8N_IMAGE",
+  "CADDY_IMAGE",
   "DATABASE_URL",
   "POSTGRES_DB",
   "POSTGRES_USER",
@@ -36,12 +41,25 @@ const required = [
 
 const errors = [];
 const values = {};
+const DIGEST_IMAGE_RE = /^[^\s]+@sha256:[a-f0-9]{64}$/i;
 for (const name of required) {
   const value = String(process.env[name] || "").trim();
   values[name] = value;
   if (!value) errors.push(name + " is required");
   if (/replace-with|changeme|example-secret|password123/i.test(value)) {
     errors.push(name + " still contains a placeholder");
+  }
+}
+
+for (const name of [
+  "NODE_BASE_IMAGE",
+  "PLAYWRIGHT_BASE_IMAGE",
+  "POSTGRES_IMAGE",
+  "N8N_IMAGE",
+  "CADDY_IMAGE",
+]) {
+  if (values[name] && !DIGEST_IMAGE_RE.test(values[name])) {
+    errors.push(name + " must be pinned to an @sha256:<64-hex> digest");
   }
 }
 

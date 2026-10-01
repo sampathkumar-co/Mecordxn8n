@@ -318,7 +318,11 @@ export function createServer({
     throw new Error("ORCHESTRATOR_TOKEN is required");
   }
   const resolvedWorkerCredentials =
-    workerCredentials || buildWorkerCredentials({ legacyToken: workerToken });
+    workerCredentials ||
+    buildWorkerCredentials({
+      env: workerToken ? {} : process.env,
+      legacyToken: workerToken,
+    });
   if (!resolvedWorkerCredentials.length) {
     throw new Error("at least one worker credential is required");
   }

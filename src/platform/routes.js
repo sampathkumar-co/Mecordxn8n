@@ -34,6 +34,11 @@ import {
   revokePlatformSession,
   revokePlatformUserSession,
 } from "./auth.js";
+import { consumePublicRateLimit } from "../milestone-h/repository.js";
+import {
+  clearPlatformSessionCookie,
+  setPlatformSessionCookie,
+} from "./session-http.js";
 import { decidePlatformApproval } from "./approvals.js";
 import {
   approvalBelongsToWorkspace,
@@ -68,6 +73,17 @@ const UUID_RE =
 
 function validId(value) {
   return UUID_RE.test(String(value || ""));
+}
+
+function publicClientAddress(req) {
+  const direct = String(req.socket?.remoteAddress || "unknown").trim();
+  if (String(process.env.TRUST_PROXY_HEADERS || "").toLowerCase() !== "true") {
+    return direct;
+  }
+  const forwarded = String(req.headers["x-forwarded-for"] || "")
+    .split(",")[0]
+    .trim();
+  return (forwarded || direct).slice(0, 128);
 }
 
 function boundedString(value, max, name, badRequest, { required = false } = {}) {
@@ -260,17 +276,27 @@ export async function handlePlatformPublicRoute({
       workspaceSlug: body.workspaceSlug,
       userAgent: req.headers["user-agent"] || "",
     });
+    setPlatformSessionCookie(res, result.token, result.expiresAt);
     return json(res, 201, result);
   }
 
   if (req.method === "POST" && url.pathname === "/v1/platform/auth/login") {
     const body = await readJson(req);
+    const remoteAddress = publicClientAddress(req);
+    const emailKey = String(body.email || "").trim().toLowerCase();
+    if (!(await consumePublicRateLimit({ key: "login-ip:" + remoteAddress, limit: 30 }))) {
+      return json(res, 429, { error: "LOGIN_RATE_LIMITED" });
+    }
+    if (!(await consumePublicRateLimit({ key: "login-email:" + emailKey, limit: 8 }))) {
+      return json(res, 429, { error: "LOGIN_RATE_LIMITED" });
+    }
     const result = await loginPlatformUser({
       email: body.email,
       password: body.password,
       userAgent: req.headers["user-agent"] || "",
     });
     if (!result) return json(res, 401, { error: "INVALID_CREDENTIALS" });
+    setPlatformSessionCookie(res, result.token, result.expiresAt);
     return json(res, 200, result);
   }
 
@@ -279,6 +305,16 @@ export async function handlePlatformPublicRoute({
     url.pathname === "/v1/platform/auth/accept-invite"
   ) {
     const body = await readJson(req);
+    const remoteAddress = publicClientAddress(req);
+    if (!(await consumePublicRateLimit({ key: "invite-ip:" + remoteAddress, limit: 20 }))) {
+      return json(res, 429, { error: "INVITE_RATE_LIMITED" });
+    }
+    if (!(await consumePublicRateLimit({
+      key: "invite-token:" + String(body.inviteToken || ""),
+      limit: 5,
+    }))) {
+      return json(res, 429, { error: "INVITE_RATE_LIMITED" });
+    }
     const result = await acceptWorkspaceInvite({
       token: body.inviteToken,
       password: body.password,
@@ -288,6 +324,7 @@ export async function handlePlatformPublicRoute({
     if (!result) {
       return json(res, 401, { error: "INVALID_OR_EXPIRED_INVITE" });
     }
+    setPlatformSessionCookie(res, result.token, result.expiresAt);
     return json(res, 200, result);
   }
 
@@ -325,6 +362,7 @@ export async function handlePlatformRoute({
     if (principal.kind === "SESSION") {
       await revokePlatformSession(principal.id);
     }
+    clearPlatformSessionCookie(res);
     return json(res, 204, {});
   }
 

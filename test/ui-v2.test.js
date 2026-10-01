@@ -76,6 +76,18 @@ test("unknown console file extensions and traversal-like asset paths are not ser
   assert.equal(encoded.status, 404);
 });
 
+test("Control Center navigation iterates the full navigation collection", () => {
+  const source = fs.readFileSync(path.resolve("web/console/app.js"), "utf8");
+  assert.match(
+    source,
+    /\$\$\("\[data-link\]\[data-area\], \[data-link\]\[data-route-name\]"\)\.forEach/,
+  );
+  assert.equal(
+    source.includes('$("[data-link][data-area], [data-link][data-route-name]").forEach'),
+    false,
+  );
+});
+
 test("Control Center browser routing does not depend on legacy bearer storage", () => {
   const source = fs.readFileSync(path.resolve("web/console/app.js"), "utf8");
   assert.equal(source.includes("if (!state.token || !state.me) return;"), false);

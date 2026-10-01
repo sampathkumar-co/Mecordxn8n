@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - "build/**"
+      - "hardening/**"
   pull_request:
   schedule:
     - cron: "17 3 * * 1"

@@ -133,6 +133,14 @@ jobs:
             -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" \
             caddy:2.10-alpine \
             caddy validate --config /etc/caddy/Caddyfile
+
+          PUBLIC_APP_URL=https://app.example.test \
+          CONTROL_API_HOST_PORT=18080 \
+            node scripts/render-host-caddy.mjs > /tmp/host-caddy.Caddyfile
+          docker run --rm \
+            -v "/tmp/host-caddy.Caddyfile:/etc/caddy/Caddyfile:ro" \
+            caddy:2.10-alpine \
+            caddy validate --config /etc/caddy/Caddyfile
       - name: Validate Docker Compose
         run: |
           docker compose --env-file .env.example config >/dev/null

@@ -84,6 +84,16 @@ export async function api(path, options = {}) {
       throw expired;
     }
 
+    if (
+      response.status === 403 &&
+      ["EMAIL_VERIFICATION_REQUIRED","MFA_ENROLLMENT_REQUIRED","MFA_STEP_UP_REQUIRED"]
+        .includes(payload?.error)
+    ) {
+      document.dispatchEvent(new CustomEvent("mecord:security-action-required", {
+        detail: { code: payload.error },
+      }));
+    }
+
     if (!response.ok) {
       const error = new Error(payload?.message || payload?.error || "Request failed");
       error.code = payload?.error || "REQUEST_FAILED";

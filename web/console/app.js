@@ -228,7 +228,8 @@ async function signOut(notify=true){
 }
 
 function authPanel(name){
-  ["login-form","signup-form","bootstrap-form"].forEach((id)=>$("#"+id).classList.toggle("hidden",id!==name));
+  ["login-form","signup-form","bootstrap-form","forgot-password-form","reset-password-form"]
+    .forEach((id)=>$("#"+id).classList.toggle("hidden",id!==name));
 }
 
 $("#login-form").addEventListener("submit",async(event)=>{
@@ -267,7 +268,15 @@ $("#signup-form").addEventListener("submit",async(event)=>{
       email:$("#signup-email").value,displayName:$("#signup-name").value,password:$("#signup-password").value,
       workspaceName:$("#signup-workspace").value,workspaceSlug:$("#signup-slug").value||$("#signup-workspace").value,
     })});
-    setBrowserSession(result);setWorkspace(result.workspace.id);await boot();navigate("/console/home",{replace:true});
+    setBrowserSession(result);
+    setWorkspace(result.workspace.id);
+    await boot();
+    navigate("/console/home",{replace:true});
+    if(result.emailVerification?.required){
+      toast(result.emailVerification.delivered
+        ? "Check your email to verify the account before running assessments."
+        : "Account created. Email verification delivery is not available yet.", !result.emailVerification.delivered);
+    }
   }catch(error){toast(error.message,true);}
 });
 
@@ -291,6 +300,51 @@ $("#show-signup").addEventListener("click",()=>authPanel("signup-form"));
 $("#signup-back-login").addEventListener("click",()=>authPanel("login-form"));
 $("#show-bootstrap").addEventListener("click",()=>authPanel("bootstrap-form"));
 $("#show-login").addEventListener("click",()=>authPanel("login-form"));
+$("#show-forgot-password").addEventListener("click",()=>{
+  $("#forgot-password-email").value=$("#login-email").value;
+  authPanel("forgot-password-form");
+});
+$("#forgot-back-login").addEventListener("click",()=>authPanel("login-form"));
+$("#reset-back-login").addEventListener("click",()=>authPanel("login-form"));
+
+$("#forgot-password-form").addEventListener("submit",async(event)=>{
+  event.preventDefault();
+  const button=event.currentTarget.querySelector('button[type="submit"]');
+  button.disabled=true;
+  try{
+    await api("/v1/platform/auth/password-reset/request",{
+      method:"POST",
+      body:JSON.stringify({email:$("#forgot-password-email").value}),
+    });
+    toast("If that account exists, a password-reset link has been sent.");
+    authPanel("login-form");
+  }catch(error){toast(error.message,true);}
+  finally{button.disabled=false;}
+});
+
+let pendingResetToken="";
+$("#reset-password-form").addEventListener("submit",async(event)=>{
+  event.preventDefault();
+  const password=$("#reset-password-new").value;
+  if(password!==$("#reset-password-confirm").value){
+    toast("The passwords do not match.",true);
+    return;
+  }
+  const button=event.currentTarget.querySelector('button[type="submit"]');
+  button.disabled=true;
+  try{
+    await api("/v1/platform/auth/password-reset/confirm",{
+      method:"POST",
+      body:JSON.stringify({token:pendingResetToken,password}),
+    });
+    clearBrowserSession();
+    state.me=null;
+    pendingResetToken="";
+    toast("Password reset. Sign in with your new password.");
+    authPanel("login-form");
+  }catch(error){toast(error.message,true);}
+  finally{button.disabled=false;}
+});
 
 $("#workspace-select").addEventListener("change",async(event)=>{
   setWorkspace(event.target.value);
@@ -332,5 +386,34 @@ document.addEventListener("keydown",(event)=>{
   if(path){event.preventDefault();navigate(path);}
 });
 
+async function handleAuthActionLink(){
+  const params=new URLSearchParams(location.search);
+  const verificationToken=params.get("verify_email");
+  const resetToken=params.get("reset_password");
+  if(verificationToken){
+    try{
+      await api("/v1/platform/auth/verify-email",{
+        method:"POST",
+        body:JSON.stringify({token:verificationToken}),
+      });
+      toast("Email verified. Your account can now run authorized assessments.");
+    }catch(error){toast(error.message,true);}
+    params.delete("verify_email");
+    history.replaceState({}, "", location.pathname + (params.toString() ? "?" + params : ""));
+  }
+  if(resetToken){
+    pendingResetToken=resetToken;
+    params.delete("reset_password");
+    history.replaceState({}, "", location.pathname + (params.toString() ? "?" + params : ""));
+    showAuth();
+    authPanel("reset-password-form");
+    $("#reset-password-new").focus();
+    return true;
+  }
+  return false;
+}
+
 startRouter();
-boot();
+handleAuthActionLink().then((recoveryActive)=>{
+  if(!recoveryActive) void boot();
+});

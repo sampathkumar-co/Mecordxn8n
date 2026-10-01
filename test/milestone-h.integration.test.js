@@ -437,6 +437,29 @@ test(
     );
     assert.equal(target.status, 201);
 
+    const unverifiedAssessment = await request(
+      "/v1/platform/workspaces/" + workspaceId +
+        "/targets/" + target.body.id + "/assess",
+      { method: "POST", token, body: {} },
+    );
+    assert.equal(unverifiedAssessment.status, 409);
+    assert.equal(
+      unverifiedAssessment.body.error,
+      "DOMAIN_VERIFICATION_REQUIRED",
+    );
+
+    const challenge = await request(
+      "/v1/platform/workspaces/" + workspaceId +
+        "/targets/" + target.body.id + "/domain-verification",
+      { method: "POST", token, body: {} },
+    );
+    assert.equal(challenge.status, 201);
+    await completeDomainVerification({
+      workspaceId,
+      verificationId: challenge.body.id,
+      matched: true,
+    });
+
     const assessed = await request(
       "/v1/platform/workspaces/" + workspaceId +
         "/targets/" + target.body.id + "/assess",

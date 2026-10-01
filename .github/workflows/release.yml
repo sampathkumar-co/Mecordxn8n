@@ -52,6 +52,7 @@ jobs:
       WORKER_TOKEN_INTEGRATION: release-integration-worker-token-000000000007
       WORKER_TRIGGER_TOKEN: release-gate-trigger-token-with-at-least-32-characters
       N8N_ENCRYPTION_KEY: release-gate-n8n-key-with-at-least-32-characters
+      BACKUP_ENCRYPTION_KEY: release-gate-backup-encryption-key-00000000001
       APP_DOMAIN: app.example.test
       ACME_EMAIL: ops@example.test
       PUBLIC_APP_URL: https://app.example.test

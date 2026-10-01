@@ -19,6 +19,7 @@ const required = [
   "N8N_ENCRYPTION_KEY",
   "BACKUP_ENCRYPTION_KEY",
   "PLATFORM_MASTER_KEY",
+  "PLATFORM_AUTH_KEY",
   "BOOTSTRAP_TOKEN",
   "APP_DOMAIN",
   "ACME_EMAIL",
@@ -51,6 +52,7 @@ for (const name of [
   "N8N_ENCRYPTION_KEY",
   "BACKUP_ENCRYPTION_KEY",
   "PLATFORM_MASTER_KEY",
+  "PLATFORM_AUTH_KEY",
   "BOOTSTRAP_TOKEN",
 ]) {
   if (values[name] && values[name].length < 32) {

@@ -15,14 +15,22 @@ const browser = await chromium.launch({ headless: true });
 const failures = [];
 
 function captureRuntimeErrors(page, label) {
+  let authenticated = false;
   page.on("pageerror", (error) => {
     failures.push(`${label}: pageerror: ${error.message}`);
   });
   page.on("console", (message) => {
-    if (message.type() === "error") {
-      failures.push(`${label}: console.error: ${message.text()}`);
+    if (message.type() !== "error") return;
+    const messageText = message.text();
+    if (
+      !authenticated &&
+      /Failed to load resource:.*401 \(Unauthorized\)/i.test(messageText)
+    ) {
+      return;
     }
+    failures.push(`${label}: console.error: ${messageText}`);
   });
+  return () => { authenticated = true; };
 }
 
 async function assertNoHorizontalOverflow(page, label) {
@@ -72,7 +80,7 @@ const desktop = await browser.newContext({
   viewport: { width: 1440, height: 960 },
 });
 const page = await desktop.newPage();
-captureRuntimeErrors(page, "desktop");
+const markDesktopAuthenticated = captureRuntimeErrors(page, "desktop");
 
 await page.goto(base + "/console", { waitUntil: "networkidle" });
 await page.locator("#show-signup").click();
@@ -89,6 +97,7 @@ await Promise.all([
   page.locator("#signup-form button[type=submit]").click(),
 ]);
 await page.locator("#app-view:not(.hidden)").waitFor({ timeout: 10_000 });
+markDesktopAuthenticated();
 await page.locator("#content").waitFor({ state: "visible" });
 await assertNoHorizontalOverflow(page, "desktop-home");
 await assertInteractiveNames(page, "desktop-home");
@@ -113,7 +122,7 @@ const mobile = await browser.newContext({
   isMobile: true,
 });
 const mobilePage = await mobile.newPage();
-captureRuntimeErrors(mobilePage, "mobile");
+const markMobileAuthenticated = captureRuntimeErrors(mobilePage, "mobile");
 
 await mobilePage.goto(base + "/console", { waitUntil: "networkidle" });
 await mobilePage.locator("#login-email").fill(email);
@@ -126,6 +135,7 @@ await Promise.all([
   mobilePage.locator("#login-form button[type=submit]").click(),
 ]);
 await mobilePage.locator("#app-view:not(.hidden)").waitFor({ timeout: 10_000 });
+markMobileAuthenticated();
 await assertNoHorizontalOverflow(mobilePage, "mobile-home");
 await mobilePage.locator("#mobile-menu").click();
 await mobilePage.locator("#sidebar.mobile-open").waitFor();

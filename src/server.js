@@ -51,6 +51,7 @@ import {
 import {
   attachRequestLogging,
   logUnhandledRequestError,
+  renderPrometheusMetrics,
 } from "./observability.js";
 import {
   dispatchWorkerOnce,
@@ -341,6 +342,20 @@ export function createServer({
       if (req.method === "GET" && url.pathname === "/healthz") {
         await pingDatabase();
         return json(res, 200, { ok: true, database: "ready" });
+      }
+
+      if (req.method === "GET" && url.pathname === "/metrics") {
+        if (!requireBearer(req, orchestratorToken)) {
+          return json(res, 401, { error: "UNAUTHORIZED" });
+        }
+        const body = renderPrometheusMetrics();
+        res.writeHead(200, {
+          "content-type": "text/plain; version=0.0.4; charset=utf-8",
+          "content-length": Buffer.byteLength(body),
+          "cache-control": "no-store",
+          "x-content-type-options": "nosniff",
+        });
+        return res.end(body);
       }
 
       if (url.pathname.startsWith("/console")) {

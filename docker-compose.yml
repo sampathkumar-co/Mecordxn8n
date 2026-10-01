@@ -7,7 +7,7 @@ x-node-hardening: &node-hardening
 
 services:
   postgres:
-    image: postgres:17-alpine
+    image: ${POSTGRES_IMAGE:-postgres:17-alpine}
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
@@ -24,7 +24,7 @@ services:
       - app-db
 
   n8n-postgres:
-    image: postgres:17-alpine
+    image: ${POSTGRES_IMAGE:-postgres:17-alpine}
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${N8N_POSTGRES_DB}
@@ -42,7 +42,10 @@ services:
 
   control-api:
     <<: *node-hardening
-    build: .
+    build:
+      context: .
+      args:
+        NODE_BASE_IMAGE: ${NODE_BASE_IMAGE:-node:22-alpine}
     restart: unless-stopped
     read_only: true
     tmpfs:
@@ -109,7 +112,10 @@ services:
 
   http-observer:
     <<: *node-hardening
-    build: .
+    build:
+      context: .
+      args:
+        NODE_BASE_IMAGE: ${NODE_BASE_IMAGE:-node:22-alpine}
     restart: unless-stopped
     read_only: true
     tmpfs:
@@ -132,6 +138,8 @@ services:
     build: &browser-build
       context: .
       dockerfile: Dockerfile.browser
+      args:
+        PLAYWRIGHT_BASE_IMAGE: ${PLAYWRIGHT_BASE_IMAGE:-mcr.microsoft.com/playwright:v1.63.0-noble}
     restart: unless-stopped
     user: pwuser
     shm_size: "1gb"
@@ -223,7 +231,10 @@ services:
 
   remediation:
     <<: *node-hardening
-    build: .
+    build:
+      context: .
+      args:
+        NODE_BASE_IMAGE: ${NODE_BASE_IMAGE:-node:22-alpine}
     restart: unless-stopped
     read_only: true
     tmpfs:
@@ -246,7 +257,10 @@ services:
 
   integration-delivery:
     <<: *node-hardening
-    build: .
+    build:
+      context: .
+      args:
+        NODE_BASE_IMAGE: ${NODE_BASE_IMAGE:-node:22-alpine}
     restart: unless-stopped
     read_only: true
     tmpfs:
@@ -266,7 +280,7 @@ services:
 
   n8n:
     <<: *node-hardening
-    image: docker.n8n.io/n8nio/n8n:2.40.7
+    image: ${N8N_IMAGE:-docker.n8n.io/n8nio/n8n:2.40.7}
     restart: unless-stopped
     environment:
       DB_TYPE: postgresdb

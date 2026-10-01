@@ -76,9 +76,20 @@ compose=(
 "${compose[@]}" config --quiet
 "${compose[@]}" build --pull
 
-# Run the repository's production gate in the exact image/configuration that is
-# about to be deployed. No dependencies are started for this check.
-"${compose[@]}" run --rm --no-deps control-api   node scripts/production-preflight.mjs
+# Run the repository's production gate in the exact control image that is
+# about to be deployed, while passing the complete production dotenv rather
+# than only the subset forwarded by the Compose service definition.
+control_image="$("${compose[@]}" images -q control-api | head -n 1)"
+[[ -n "$control_image" ]] || fail "control image was not built"
+docker run --rm \
+  --network none \
+  --read-only \
+  --cap-drop ALL \
+  --security-opt no-new-privileges \
+  --env-file .env \
+  --entrypoint node \
+  "$control_image" \
+  scripts/production-preflight.mjs
 
 "${compose[@]}" up -d --remove-orphans
 

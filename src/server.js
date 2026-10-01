@@ -52,6 +52,10 @@ import {
   attachRequestLogging,
   logUnhandledRequestError,
 } from "./observability.js";
+import {
+  dispatchWorkerOnce,
+  knownDispatchWorker,
+} from "./orchestration/dispatch.js";
 
 const MAX_BODY_BYTES = 256 * 1024;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -445,6 +449,20 @@ export function createServer({
           assertWorkerBody(workerPrincipal, await readJson(request));
       } else if (!requireBearer(req, orchestratorToken)) {
         return json(res, 401, { error: "UNAUTHORIZED" });
+      }
+
+      const dispatchMatch = url.pathname.match(
+        /^\/v1\/orchestration\/workers\/([a-z0-9-]+)\/run-once$/i,
+      );
+      if (req.method === "POST" && dispatchMatch) {
+        if (!knownDispatchWorker(dispatchMatch[1])) {
+          return json(res, 404, { error: "WORKER_DISPATCH_NOT_FOUND" });
+        }
+        return json(
+          res,
+          200,
+          await dispatchWorkerOnce(dispatchMatch[1]),
+        );
       }
 
       if (

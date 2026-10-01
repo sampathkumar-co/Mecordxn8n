@@ -20,10 +20,13 @@ const required = [
   "BACKUP_ENCRYPTION_KEY",
   "PLATFORM_MASTER_KEY",
   "PLATFORM_AUTH_KEY",
+  "AUTH_MAIL_WEBHOOK_SECRET",
   "BOOTSTRAP_TOKEN",
   "APP_DOMAIN",
   "ACME_EMAIL",
   "PUBLIC_APP_URL",
+  "AUTH_MAIL_WEBHOOK_URL",
+  "AUTH_MAIL_WEBHOOK_SECRET",
 ];
 
 const errors = [];
@@ -135,6 +138,14 @@ if (
   mfaStepUpMinutes > 240
 ) {
   errors.push("MFA_STEP_UP_MINUTES must be an integer from 1 to 240");
+}
+
+if (values.AUTH_MAIL_WEBHOOK_URL) {
+  let mailUrl;
+  try { mailUrl = new URL(values.AUTH_MAIL_WEBHOOK_URL); } catch {}
+  if (!mailUrl || mailUrl.protocol !== "https:") {
+    errors.push("AUTH_MAIL_WEBHOOK_URL must be an HTTPS URL");
+  }
 }
 
 if (values.PUBLIC_APP_URL) {

@@ -64,6 +64,14 @@ function validId(value) {
   return UUID_RE.test(String(value || ""));
 }
 
+function browserSessionResponse(req, result) {
+  if (String(req.headers["x-mecord-session-mode"] || "").toLowerCase() !== "cookie") {
+    return result;
+  }
+  const { token: _token, ...safe } = result;
+  return safe;
+}
+
 function publicClientAddress(req) {
   const direct = String(req.socket?.remoteAddress || "unknown").trim();
   if (String(process.env.TRUST_PROXY_HEADERS || "").toLowerCase() !== "true") {
@@ -193,7 +201,7 @@ export async function handleMilestoneHPublicRoute({
         userAgent: req.headers["user-agent"] || "",
       });
       setPlatformSessionCookie(res, result.token, result.expiresAt);
-      return json(res, 201, result);
+      return json(res, 201, browserSessionResponse(req, result));
     } catch (error) {
       if (error.code === "23505" || error.code === "ACCOUNT_EXISTS") {
         return json(res, 409, { error: "SIGNUP_CONFLICT" });

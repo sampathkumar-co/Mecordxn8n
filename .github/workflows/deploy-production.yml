@@ -99,6 +99,10 @@ jobs:
 
           node --env-file=.deploy/production.env scripts/production-preflight.mjs
 
+          PUBLIC_APP_URL="$PUBLIC_APP_URL" \
+          CONTROL_API_HOST_PORT="$CONTROL_API_HOST_PORT" \
+            node scripts/render-host-caddy.mjs > .deploy/host-caddy.caddy
+
       - name: Configure pinned SSH host identity
         env:
           DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
@@ -125,14 +129,14 @@ jobs:
       - name: Upload release over pinned SSH
         run: |
           set -Eeuo pipefail
-          scp -o BatchMode=yes -o StrictHostKeyChecking=yes             .deploy/release.tar.gz             .deploy/production.env             scripts/deploy-production-remote.sh             "$DEPLOY_USER@$DEPLOY_HOST:/tmp/"
+          scp -o BatchMode=yes -o StrictHostKeyChecking=yes             .deploy/release.tar.gz             .deploy/production.env             .deploy/host-caddy.caddy             scripts/deploy-production-remote.sh             "$DEPLOY_USER@$DEPLOY_HOST:/tmp/"
 
       - name: Deploy and verify internal readiness
         env:
           ARCHIVE_SHA: ${{ steps.package.outputs.archive_sha }}
         run: |
           set -Eeuo pipefail
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes             "$DEPLOY_USER@$DEPLOY_HOST"             "chmod 700 /tmp/deploy-production-remote.sh && /tmp/deploy-production-remote.sh /tmp/release.tar.gz /tmp/production.env '$DEPLOY_PATH' '$GITHUB_SHA' '$ARCHIVE_SHA' '$DEPLOY_INGRESS_MODE'"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes             "$DEPLOY_USER@$DEPLOY_HOST"             "chmod 700 /tmp/deploy-production-remote.sh && /tmp/deploy-production-remote.sh /tmp/release.tar.gz /tmp/production.env '$DEPLOY_PATH' '$GITHUB_SHA' '$ARCHIVE_SHA' '$DEPLOY_INGRESS_MODE' /tmp/host-caddy.caddy"
 
       - name: Strict authenticated HTTPS smoke
         env:

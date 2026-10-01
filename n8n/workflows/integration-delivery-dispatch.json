@@ -16,18 +16,21 @@
       "name": "Every Minute",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [0, 0]
+      "position": [
+        0,
+        0
+      ]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.MECORDXN8N_INTEGRATION_URL + '/trigger' }}",
+        "url": "={{ $env.MECORDXN8N_CONTROL_API_URL + '/v1/orchestration/workers/integration-delivery/run-once' }}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
             {
               "name": "Authorization",
-              "value": "={{ 'Bearer ' + $env.MECORDXN8N_WORKER_TRIGGER_TOKEN }}"
+              "value": "={{ 'Bearer ' + $env.MECORDXN8N_ORCHESTRATOR_TOKEN }}"
             }
           ]
         },
@@ -37,7 +40,10 @@
       "name": "Run Integration Delivery",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [280, 0]
+      "position": [
+        280,
+        0
+      ]
     }
   ],
   "connections": {

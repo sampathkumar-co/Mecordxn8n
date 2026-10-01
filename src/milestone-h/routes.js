@@ -1,4 +1,4 @@
-import { assertPrivilegedMfa } from "../platform/mfa-policy.js";
+import { assertPrivilegedMfa, assertVerifiedEmail } from "../platform/mfa-policy.js";
 import {
   AUTHORIZATION_MODES,
   CAPABILITIES,
@@ -486,6 +486,7 @@ export async function handleMilestoneHPlatformRoute({
       minimumRole: "OPERATOR",
       apiScope: "targets:write",
     });
+    assertVerifiedEmail(principal);
     const center = await listTargetAuthorizationCenter({
       workspaceId: match[1],
       targetId: match[2],

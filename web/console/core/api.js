@@ -31,6 +31,13 @@ export async function api(path, options = {}) {
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const headers = new Headers(options.headers || {});
+    if (
+      path === "/v1/platform/auth/login" ||
+      path === "/v1/platform/auth/signup" ||
+      path === "/v1/platform/auth/accept-invite"
+    ) {
+      headers.set("X-Mecord-Session-Mode", "cookie");
+    }
     if (state.token) headers.set("Authorization", `Bearer ${state.token}`);
     if (!retryable && state.csrfToken) {
       headers.set("X-CSRF-Token", state.csrfToken);

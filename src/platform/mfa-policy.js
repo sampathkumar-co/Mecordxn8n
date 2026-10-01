@@ -4,6 +4,23 @@ export function privilegedMfaRequired(env = process.env) {
   return String(env.REQUIRE_PRIVILEGED_MFA || "").trim().toLowerCase() === "true";
 }
 
+export function verifiedEmailRequired(env = process.env) {
+  return String(env.REQUIRE_VERIFIED_EMAIL || "").trim().toLowerCase() === "true";
+}
+
+export function assertVerifiedEmail(principal, { env = process.env } = {}) {
+  if (!verifiedEmailRequired(env)) return true;
+  if (principal?.kind !== "SESSION") return true;
+  if (principal.user?.emailVerified) return true;
+
+  const error = new Error(
+    "email verification is required before this action",
+  );
+  error.statusCode = 403;
+  error.code = "EMAIL_VERIFICATION_REQUIRED";
+  throw error;
+}
+
 export function assertPrivilegedMfa(
   principal,
   {
@@ -12,6 +29,8 @@ export function assertPrivilegedMfa(
   } = {},
 ) {
   if (!privilegedMfaRequired(env)) return true;
+
+  assertVerifiedEmail(principal, { env });
 
   if (principal?.kind !== "SESSION") {
     const error = new Error(

@@ -121,6 +121,13 @@ if (
 ) {
   errors.push("REQUIRE_PRIVILEGED_MFA must be true in production");
 }
+if (
+  String(process.env.REQUIRE_VERIFIED_EMAIL || "").trim().toLowerCase() !==
+  "true"
+) {
+  errors.push("REQUIRE_VERIFIED_EMAIL must be true in production");
+}
+
 const mfaStepUpMinutes = Number(process.env.MFA_STEP_UP_MINUTES || 30);
 if (
   !Number.isInteger(mfaStepUpMinutes) ||

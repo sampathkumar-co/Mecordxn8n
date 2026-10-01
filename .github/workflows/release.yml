@@ -77,6 +77,8 @@ jobs:
           npm sbom --sbom-format cyclonedx > artifacts/sbom.cdx.json
       - run: npm run migrate
       - run: npm run check
+      - name: Validate production deploy shell
+        run: bash -n scripts/deploy-production-remote.sh
       - name: Synthetic benchmark
         run: node scripts/benchmark.mjs
       - name: Secret scan

@@ -50,6 +50,9 @@ const requiredFiles = [
   ".github/workflows/codeql.yml",
   ".github/workflows/security.yml",
   ".github/workflows/release.yml",
+  ".github/workflows/deploy-production.yml",
+  "scripts/deploy-production-remote.sh",
+  "docs/PRODUCTION_DEPLOYMENT.md",
   "n8n/workflows/integration-delivery-dispatch.json",
   "n8n/workflows/onboarding-finalization.json",
   "src/milestone-h/routes.js",
@@ -160,6 +163,30 @@ const checks = {
       .includes("MFA_STEP_UP_REQUIRED") &&
     fs.readFileSync("src/platform/mfa-policy.js", "utf8")
       .includes("EMAIL_VERIFICATION_REQUIRED"),
+  productionDeploymentGate: (() => {
+    const workflow = fs.readFileSync(
+      ".github/workflows/deploy-production.yml",
+      "utf8",
+    );
+    const remote = fs.readFileSync(
+      "scripts/deploy-production-remote.sh",
+      "utf8",
+    );
+    return (
+      workflow.includes("workflow_dispatch:") &&
+      workflow.includes("github.ref == 'refs/heads/main'") &&
+      workflow.includes("environment: production") &&
+      workflow.includes("StrictHostKeyChecking=yes") &&
+      workflow.includes('PRODUCTION_SMOKE_STRICT: "true"') &&
+      workflow.includes("DEPLOY_KNOWN_HOSTS") &&
+      workflow.includes("parseEnv") &&
+      remote.includes("sha256sum") &&
+      remote.includes("--env-file .env") &&
+      remote.includes("production-preflight.mjs") &&
+      remote.includes("docker compose") &&
+      remote.includes("healthz")
+    );
+  })(),
   productionVersion: JSON.parse(fs.readFileSync("package.json", "utf8")).version,
 };
 

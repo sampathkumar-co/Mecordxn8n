@@ -1,3 +1,4 @@
+import { assertPrivilegedMfa } from "../platform/mfa-policy.js";
 import {
   AUTHORIZATION_MODES,
   CAPABILITIES,
@@ -309,6 +310,7 @@ export async function handleMilestoneHPlatformRoute({
       minimumRole: "ADMIN",
       apiScope: "targets:write",
     });
+    assertPrivilegedMfa(principal);
     const center = await listTargetAuthorizationCenter({
       workspaceId: match[1],
       targetId: match[2],
@@ -444,6 +446,7 @@ export async function handleMilestoneHPlatformRoute({
       minimumRole: "ADMIN",
       apiScope: "targets:write",
     });
+    assertPrivilegedMfa(principal);
     const revoked = await revokeTargetAuthorization({
       workspaceId: match[1],
       targetId: match[2],
@@ -567,6 +570,7 @@ export async function handleMilestoneHPlatformRoute({
       minimumRole: "ADMIN",
       apiScope: "approvals:write",
     });
+    assertPrivilegedMfa(principal);
     if (principal.kind !== "SESSION") {
       return json(res, 403, { error: "SESSION_REQUIRED" });
     }

@@ -7,6 +7,7 @@ deploy_root="${3:-}"
 release_sha="${4:-}"
 expected_archive_sha="${5:-}"
 ingress_mode="${6:-}"
+incoming_host_caddy="${7:-}"
 
 fail() {
   printf 'deploy error: %s\n' "$*" >&2
@@ -21,6 +22,9 @@ fail() {
 [[ "$expected_archive_sha" =~ ^[a-f0-9]{64}$ ]] || fail "archive checksum is invalid"
 [[ "$ingress_mode" == "external" || "$ingress_mode" == "standalone" ]] ||
   fail "ingress mode must be external or standalone"
+if [[ "$ingress_mode" == "external" ]]; then
+  [[ -f "$incoming_host_caddy" ]] || fail "host Caddy snippet is missing"
+fi
 
 actual_archive_sha="$(sha256sum "$archive" | awk '{print $1}')"
 [[ "$actual_archive_sha" == "$expected_archive_sha" ]] ||
@@ -32,7 +36,7 @@ current_link="$deploy_root/current"
 previous_link="$deploy_root/previous"
 
 cleanup() {
-  rm -f "$incoming_env" "$archive"
+  rm -f "$incoming_env" "$archive" "$incoming_host_caddy"
   rm -rf "$staging_dir"
 }
 trap cleanup EXIT
@@ -58,6 +62,9 @@ if [[ ! -d "$release_dir" ]]; then
 fi
 
 install -m 600 "$incoming_env" "$release_dir/.env"
+if [[ "$ingress_mode" == "external" ]]; then
+  install -m 644 "$incoming_host_caddy" "$release_dir/host-caddy.caddy"
+fi
 
 if [[ -n "$current_real" && "$current_real" != "$release_dir" ]]; then
   ln -sfn "$current_real" "$previous_link"

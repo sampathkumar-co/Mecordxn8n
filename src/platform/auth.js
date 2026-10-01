@@ -572,15 +572,16 @@ export async function acceptWorkspaceInvite({
       const salt = randomBytes(24).toString("hex");
       userResult = await client.query(
         `INSERT INTO platform_users (
-           email, display_name, password_salt, password_hash
+           email, display_name, password_salt, password_hash, password_version
          )
-         VALUES ($1,$2,$3,$4)
+         VALUES ($1,$2,$3,$4,$5)
          RETURNING *`,
         [
           invite.email,
           display,
           salt,
-          passwordDigest(normalizedPassword, salt),
+          passwordDigest(normalizedPassword, salt, CURRENT_PASSWORD_VERSION),
+          CURRENT_PASSWORD_VERSION,
         ],
       );
       user = userResult.rows[0];

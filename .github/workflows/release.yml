@@ -103,6 +103,19 @@ jobs:
         run: createdb -h 127.0.0.1 -U postgres mecordxn8n_restore
       - name: Restore verification
         run: node scripts/restore-verify.mjs artifacts/database.backup
+      - name: Evidence backup and restore verification
+        run: |
+          node - <<'NODE'
+          const fs = require("node:fs");
+          const crypto = require("node:crypto");
+          const bytes = Buffer.from("release-gate-content-addressed-evidence\n");
+          const sha = crypto.createHash("sha256").update(bytes).digest("hex");
+          const file = "artifacts/evidence-store/" + sha.slice(0,2) + "/" + sha.slice(2,4) + "/" + sha;
+          fs.mkdirSync(require("node:path").dirname(file), { recursive: true });
+          fs.writeFileSync(file, bytes);
+          NODE
+          EVIDENCE_STORE_DIR="$PWD/artifacts/evidence-store" node scripts/backup-evidence.mjs "$PWD/artifacts/evidence-store" "$PWD/artifacts/evidence-backup"
+          node scripts/verify-evidence-backup.mjs "$PWD/artifacts/evidence-backup"
       - name: Production preflight
         env:
           DEPENDENCY_HEALTH_ENABLED: "true"
@@ -137,6 +150,7 @@ jobs:
             artifacts/release-certification.json
             artifacts/sbom.cdx.json
             artifacts/database.backup.json
+            artifacts/evidence-backup/manifest.json
       - name: Verify generated SBOM is valid JSON
         run: node -e "JSON.parse(require('node:fs').readFileSync('artifacts/sbom.cdx.json','utf8'))"
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
@@ -145,4 +159,5 @@ jobs:
           path: |
             artifacts/release-certification.json
             artifacts/database.backup.json
+            artifacts/evidence-backup/manifest.json
             artifacts/sbom.cdx.json

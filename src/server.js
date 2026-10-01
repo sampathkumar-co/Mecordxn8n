@@ -38,6 +38,12 @@ import {
   handleIntegrationWebhookRoute,
   handleIntegrationWorkerRoute,
 } from "./integrations/routes.js";
+import {
+  assertWorkerBody,
+  authenticateWorkerCredential,
+  buildWorkerCredentials,
+  workerPathAllowed,
+} from "./workers/identity.js";
 
 const MAX_BODY_BYTES = 256 * 1024;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -293,13 +299,16 @@ function badRequest(message) {
 export function createServer({
   orchestratorToken = process.env.ORCHESTRATOR_TOKEN,
   workerToken = process.env.WORKER_TOKEN,
+  workerCredentials = null,
   bootstrapToken = process.env.BOOTSTRAP_TOKEN,
 } = {}) {
   if (!orchestratorToken) {
     throw new Error("ORCHESTRATOR_TOKEN is required");
   }
-  if (!workerToken) {
-    throw new Error("WORKER_TOKEN is required");
+  const resolvedWorkerCredentials =
+    workerCredentials || buildWorkerCredentials({ legacyToken: workerToken });
+  if (!resolvedWorkerCredentials.length) {
+    throw new Error("at least one worker credential is required");
   }
 
   const server = http.createServer(async (req, res) => {
@@ -397,7 +406,22 @@ export function createServer({
       }
 
       const workerRoute = url.pathname.startsWith("/v1/worker/");
-      if (!requireBearer(req, workerRoute ? workerToken : orchestratorToken)) {
+      let workerPrincipal = null;
+      let routeReadJson = readJson;
+      if (workerRoute) {
+        workerPrincipal = authenticateWorkerCredential(
+          bearerToken(req),
+          resolvedWorkerCredentials,
+        );
+        if (!workerPrincipal) {
+          return json(res, 401, { error: "WORKER_UNAUTHORIZED" });
+        }
+        if (!workerPathAllowed(workerPrincipal, url.pathname)) {
+          return json(res, 403, { error: "WORKER_ROUTE_SCOPE" });
+        }
+        routeReadJson = async (request) =>
+          assertWorkerBody(workerPrincipal, await readJson(request));
+      } else if (!requireBearer(req, orchestratorToken)) {
         return json(res, 401, { error: "UNAUTHORIZED" });
       }
 
@@ -420,7 +444,7 @@ export function createServer({
         res,
         url,
         json,
-        readJson,
+        readJson: routeReadJson,
         badRequest,
       });
       if (integrationWorkerHandled !== false) return;
@@ -430,7 +454,7 @@ export function createServer({
         res,
         url,
         json,
-        readJson,
+        readJson: routeReadJson,
         badRequest,
       });
       if (milestoneCHandled !== false) return;
@@ -440,7 +464,7 @@ export function createServer({
         res,
         url,
         json,
-        readJson,
+        readJson: routeReadJson,
         badRequest,
       });
       if (milestoneBHandled !== false) return;
@@ -450,13 +474,13 @@ export function createServer({
         res,
         url,
         json,
-        readJson,
+        readJson: routeReadJson,
         badRequest,
       });
       if (milestoneAHandled !== false) return;
 
       if (req.method === "POST" && url.pathname === "/v1/worker/jobs/lease") {
-        const body = normalizeLeaseInput(await readJson(req));
+        const body = normalizeLeaseInput(await routeReadJson(req));
         const job = await leaseNextJob(body);
         if (!job) return json(res, 204, {});
         return json(res, 200, job);
@@ -465,7 +489,7 @@ export function createServer({
       const findingMatch = url.pathname.match(/^\/v1\/worker\/jobs\/([0-9a-f-]+)\/findings$/i);
       if (req.method === "POST" && findingMatch) {
         if (!UUID_RE.test(findingMatch[1])) throw badRequest("job id is invalid");
-        const body = normalizeFindingInput(await readJson(req));
+        const body = normalizeFindingInput(await routeReadJson(req));
         const finding = await upsertFindingFromLease({
           jobId: findingMatch[1],
           ...body,
@@ -479,7 +503,7 @@ export function createServer({
       const completionMatch = url.pathname.match(/^\/v1\/worker\/jobs\/([0-9a-f-]+)\/complete$/i);
       if (req.method === "POST" && completionMatch) {
         if (!UUID_RE.test(completionMatch[1])) throw badRequest("job id is invalid");
-        const body = normalizeCompletionInput(await readJson(req));
+        const body = normalizeCompletionInput(await routeReadJson(req));
         const job = await completeLeasedJob({
           jobId: completionMatch[1],
           ...body,

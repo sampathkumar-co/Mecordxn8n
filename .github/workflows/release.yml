@@ -35,6 +35,7 @@ jobs:
       RESTORE_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/mecordxn8n_restore
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
       PLATFORM_MASTER_KEY: release-gate-master-key-must-be-at-least-32-characters
+      PLATFORM_AUTH_KEY: release-gate-auth-key-must-be-at-least-32-characters
       BOOTSTRAP_TOKEN: release-gate-bootstrap-token-with-32-characters
       POSTGRES_DB: mecordxn8n_release
       POSTGRES_USER: postgres

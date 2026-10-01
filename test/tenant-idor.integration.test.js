@@ -104,18 +104,44 @@ test(
       "beta-idor.example.test",
     );
 
+    const authorization = await pool.query(
+      `SELECT id
+         FROM authorizations
+        WHERE target_id = $1
+          AND revoked_at IS NULL
+        ORDER BY created_at DESC
+        LIMIT 1`,
+      [betaTarget.id],
+    );
+    assert.equal(authorization.rowCount, 1);
+
+    const seededJob = await pool.query(
+      `INSERT INTO jobs (
+         target_id, authorization_id, job_type, capability,
+         requested_url, input, state, completed_at
+       )
+       VALUES (
+         $1,$2,'idor-seed','BROWSER_QA',$3,'{}'::jsonb,'SUCCEEDED',now()
+       )
+       RETURNING id`,
+      [betaTarget.id, authorization.rows[0].id, betaTarget.baseUrl],
+    );
+    const seededJobId = seededJob.rows[0].id;
+
     const finding = await pool.query(
       `INSERT INTO findings (
-         target_id, fingerprint, category, title, severity,
+         target_id, first_job_id, last_job_id,
+         fingerprint, category, title, severity,
          confidence, affected_url, evidence, verification_state, status
        )
        VALUES (
-         $1,$2,'browser','Beta private finding','HIGH',
-         0.99,$3,'{"proof":"private-beta"}'::jsonb,'VERIFIED','VERIFIED'
+         $1,$2,$2,$3,'browser','Beta private finding','HIGH',
+         0.99,$4,'{"proof":"private-beta"}'::jsonb,'VERIFIED','VERIFIED'
        )
        RETURNING id`,
       [
         betaTarget.id,
+        seededJobId,
         "idor-" + randomUUID(),
         betaTarget.baseUrl,
       ],
@@ -127,44 +153,11 @@ test(
          finding_id, job_id, status, attempts, matched_attempts,
          confidence, evidence
        )
-       SELECT $1, j.id, 'VERIFIED', 2, 2, 1.0, '{"private":"verification"}'::jsonb
-         FROM jobs j
-        WHERE j.target_id = $2
-        ORDER BY j.created_at DESC
-        LIMIT 1
+       VALUES ($1,$2,'VERIFIED',2,2,1.0,'{"private":"verification"}'::jsonb)
        RETURNING id`,
-      [findingId, betaTarget.id],
+      [findingId, seededJobId],
     );
-
-    let verificationId = verification.rows[0]?.id;
-    if (!verificationId) {
-      const authorization = await pool.query(
-        `SELECT id FROM authorizations
-          WHERE target_id = $1
-          ORDER BY created_at DESC
-          LIMIT 1`,
-        [betaTarget.id],
-      );
-      const job = await pool.query(
-        `INSERT INTO jobs (
-           target_id, authorization_id, job_type, capability,
-           requested_url, input, state
-         )
-         VALUES ($1,$2,'idor-seed','BROWSER_QA',$3,'{}'::jsonb,'SUCCEEDED')
-         RETURNING id`,
-        [betaTarget.id, authorization.rows[0].id, betaTarget.baseUrl],
-      );
-      const seeded = await pool.query(
-        `INSERT INTO finding_verifications (
-           finding_id, job_id, status, attempts, matched_attempts,
-           confidence, evidence
-         )
-         VALUES ($1,$2,'VERIFIED',2,2,1.0,'{"private":"verification"}'::jsonb)
-         RETURNING id`,
-        [findingId, job.rows[0].id],
-      );
-      verificationId = seeded.rows[0].id;
-    }
+    const verificationId = verification.rows[0].id;
 
     const artifactSha = "a".repeat(64);
     await pool.query(

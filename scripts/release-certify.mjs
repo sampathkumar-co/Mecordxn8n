@@ -179,7 +179,9 @@ const checks = {
       workflow.includes("StrictHostKeyChecking=yes") &&
       workflow.includes('PRODUCTION_SMOKE_STRICT: "true"') &&
       workflow.includes("DEPLOY_KNOWN_HOSTS") &&
+      workflow.includes("parseEnv") &&
       remote.includes("sha256sum") &&
+      remote.includes("--env-file .env") &&
       remote.includes("production-preflight.mjs") &&
       remote.includes("docker compose") &&
       remote.includes("healthz")

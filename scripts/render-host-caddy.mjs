@@ -10,8 +10,18 @@ export function renderHostCaddy({
   } catch {
     throw new Error("PUBLIC_APP_URL must be a valid URL");
   }
-  if (url.protocol !== "https:" || url.port) {
-    throw new Error("PUBLIC_APP_URL must be canonical HTTPS without a custom port");
+  if (
+    url.protocol !== "https:" ||
+    url.port ||
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash ||
+    (url.pathname !== "/" && url.pathname !== "")
+  ) {
+    throw new Error(
+      "PUBLIC_APP_URL must be an origin-only canonical HTTPS URL",
+    );
   }
   if (!/^[a-z0-9.-]+$/i.test(url.hostname)) {
     throw new Error("PUBLIC_APP_URL hostname is invalid");

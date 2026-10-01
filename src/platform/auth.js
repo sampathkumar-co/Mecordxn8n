@@ -924,6 +924,13 @@ export async function beginPlatformMfaEnrollment({ userId, email }) {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    const current = await getMfaStatus(client, userId);
+    if (current.enabled) {
+      const error = new Error("MFA is already enabled");
+      error.statusCode = 409;
+      error.code = "MFA_ALREADY_ENABLED";
+      throw error;
+    }
     const result = await beginTotpEnrollment(client, { userId, email });
     await client.query("COMMIT");
     return result;

@@ -29,14 +29,18 @@ import {
   confirmPlatformMfaEnrollment,
   consumePlatformRateLimit,
   createWorkspaceInvite,
+  createEmailVerificationToken,
   disablePlatformMfa,
   getPlatformMfaStatus,
   getWorkspaceAccess,
   loginPlatformUser,
+  requestPasswordResetToken,
+  resetPasswordWithToken,
   listPlatformUserSessions,
   listWorkspaceInvites,
   revokePlatformSession,
   revokePlatformUserSession,
+  verifyEmailWithToken,
   verifyPlatformMfaStepUp,
 } from "./auth.js";
 import {
@@ -49,6 +53,7 @@ import {
 } from "./session-http.js";
 import { decidePlatformApproval } from "./approvals.js";
 import { assertPrivilegedMfa } from "./mfa-policy.js";
+import { deliverAuthMail } from "./auth-mail.js";
 import {
   approvalBelongsToWorkspace,
   createWorkspace,
@@ -351,6 +356,85 @@ export async function handlePlatformPublicRoute({
 
   if (
     req.method === "POST" &&
+    url.pathname === "/v1/platform/auth/verify-email"
+  ) {
+    const body = await readJson(req);
+    const remoteAddress = publicClientAddress(req);
+    if (!(await consumePublicRateLimit({
+      key: "verify-email-ip:" + remoteAddress,
+      limit: 30,
+    }))) {
+      return json(res, 429, { error: "VERIFY_EMAIL_RATE_LIMITED" });
+    }
+    const verified = await verifyEmailWithToken(body.token);
+    if (!verified) {
+      return json(res, 400, { error: "VERIFY_EMAIL_TOKEN_INVALID" });
+    }
+    return json(res, 200, { verified: true });
+  }
+
+  if (
+    req.method === "POST" &&
+    url.pathname === "/v1/platform/auth/password-reset/request"
+  ) {
+    const body = await readJson(req);
+    const remoteAddress = publicClientAddress(req);
+    const emailKey = String(body.email || "").trim().toLowerCase();
+    if (!(await consumePublicRateLimit({
+      key: "password-reset-ip:" + remoteAddress,
+      limit: 20,
+    }))) {
+      return json(res, 429, { accepted: true });
+    }
+    if (!(await consumePublicRateLimit({
+      key: "password-reset-email:" + emailKey,
+      limit: 5,
+    }))) {
+      return json(res, 202, { accepted: true });
+    }
+
+    try {
+      const issued = await requestPasswordResetToken(body.email);
+      if (issued) {
+        await deliverAuthMail({
+          kind: "PASSWORD_RESET",
+          email: issued.user.email,
+          token: issued.token,
+          expiresAt: issued.expiresAt,
+        });
+      }
+    } catch {
+      // Public responses are deliberately opaque to account existence and
+      // delivery-provider state. Operators receive provider-side failures.
+    }
+    return json(res, 202, { accepted: true });
+  }
+
+  if (
+    req.method === "POST" &&
+    url.pathname === "/v1/platform/auth/password-reset/confirm"
+  ) {
+    const body = await readJson(req);
+    const remoteAddress = publicClientAddress(req);
+    if (!(await consumePublicRateLimit({
+      key: "password-reset-confirm-ip:" + remoteAddress,
+      limit: 20,
+    }))) {
+      return json(res, 429, { error: "PASSWORD_RESET_RATE_LIMITED" });
+    }
+    const reset = await resetPasswordWithToken({
+      token: body.token,
+      password: body.password,
+    });
+    if (!reset) {
+      return json(res, 400, { error: "PASSWORD_RESET_TOKEN_INVALID" });
+    }
+    clearPlatformSessionCookie(res);
+    return json(res, 200, { reset: true });
+  }
+
+  if (
+    req.method === "POST" &&
     url.pathname === "/v1/platform/auth/accept-invite"
   ) {
     const body = await readJson(req);
@@ -430,6 +514,27 @@ export async function handlePlatformRoute({
       sessions: await listPlatformUserSessions(principal.userId),
       currentSessionId: principal.id,
     });
+  }
+
+  if (
+    req.method === "POST" &&
+    url.pathname === "/v1/platform/email-verification/resend"
+  ) {
+    if (principal.kind !== "SESSION") {
+      return json(res, 403, { error: "SESSION_REQUIRED" });
+    }
+    const issued = await createEmailVerificationToken(principal.userId);
+    if (!issued) return json(res, 204, {});
+    const delivery = await deliverAuthMail({
+      kind: "EMAIL_VERIFY",
+      email: issued.user.email,
+      token: issued.token,
+      expiresAt: issued.expiresAt,
+    });
+    if (!delivery.delivered) {
+      return json(res, 503, { error: "AUTH_MAIL_NOT_CONFIGURED" });
+    }
+    return json(res, 202, { accepted: true });
   }
 
   if (url.pathname === "/v1/platform/mfa") {

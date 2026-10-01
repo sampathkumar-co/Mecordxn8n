@@ -11,7 +11,9 @@ import { limitsForPlan } from "./plans.js";
 const SESSION_TTL_HOURS = 12;
 const INVITE_TTL_HOURS = 72;
 const SESSION_PREFIX = "mcs_";
+const CSRF_PREFIX = "mcc_";
 const API_KEY_PREFIX = "mck_";
+const CURRENT_PASSWORD_VERSION = 2;
 const DUMMY_PASSWORD_SALT =
   "000000000000000000000000000000000000000000000000";
 
@@ -23,13 +25,39 @@ function randomToken(prefix, bytes = 32) {
   return `${prefix}${randomBytes(bytes).toString("base64url")}`;
 }
 
-function passwordDigest(password, salt) {
-  return scryptSync(password, salt, 64, {
-    N: 16384,
-    r: 8,
-    p: 1,
-    maxmem: 64 * 1024 * 1024,
-  }).toString("hex");
+function passwordDigest(password, salt, version = CURRENT_PASSWORD_VERSION) {
+  const current = Number(version || 1) >= CURRENT_PASSWORD_VERSION;
+  return scryptSync(password, salt, 64, current
+    ? {
+        N: 32768,
+        r: 8,
+        p: 3,
+        maxmem: 128 * 1024 * 1024,
+      }
+    : {
+        N: 16384,
+        r: 8,
+        p: 1,
+        maxmem: 64 * 1024 * 1024,
+      }).toString("hex");
+}
+
+async function upgradePasswordIfNeeded(client, user, password) {
+  if (Number(user.password_version || 1) >= CURRENT_PASSWORD_VERSION) return;
+  const salt = randomBytes(24).toString("hex");
+  const digest = passwordDigest(password, salt, CURRENT_PASSWORD_VERSION);
+  await client.query(
+    `UPDATE platform_users
+        SET password_salt = $2,
+            password_hash = $3,
+            password_version = $4,
+            updated_at = now()
+      WHERE id = $1`,
+    [user.id, salt, digest, CURRENT_PASSWORD_VERSION],
+  );
+  user.password_salt = salt;
+  user.password_hash = digest;
+  user.password_version = CURRENT_PASSWORD_VERSION;
 }
 
 function safeHexEqual(actual, expected) {
@@ -88,22 +116,26 @@ function publicUser(row) {
 
 async function issueSession(client, user, userAgent = "") {
   const token = randomToken(SESSION_PREFIX);
+  const csrfToken = randomToken(CSRF_PREFIX, 24);
   const tokenHash = sha256(token);
+  const csrfHash = sha256(csrfToken);
   const result = await client.query(
     `INSERT INTO platform_sessions (
-       user_id, token_hash, user_agent_hash, expires_at
+       user_id, token_hash, csrf_hash, user_agent_hash, expires_at
      )
-     VALUES ($1,$2,$3,now() + ($4 * interval '1 hour'))
+     VALUES ($1,$2,$3,$4,now() + ($5 * interval '1 hour'))
      RETURNING id, expires_at`,
     [
       user.id,
       tokenHash,
+      csrfHash,
       userAgent ? sha256(String(userAgent).slice(0, 1000)) : null,
       SESSION_TTL_HOURS,
     ],
   );
   return {
     token,
+    csrfToken,
     sessionId: result.rows[0].id,
     expiresAt: result.rows[0].expires_at,
   };
@@ -145,15 +177,17 @@ export async function bootstrapPlatformOwner({
     const salt = randomBytes(24).toString("hex");
     const userResult = await client.query(
       `INSERT INTO platform_users (
-         email, display_name, password_salt, password_hash, is_platform_operator
+         email, display_name, password_salt, password_hash,
+         password_version, is_platform_operator
        )
-       VALUES ($1,$2,$3,$4,true)
+       VALUES ($1,$2,$3,$4,$5,true)
        RETURNING *`,
       [
         normalizedEmail,
         display,
         salt,
-        passwordDigest(normalizedPassword, salt),
+        passwordDigest(normalizedPassword, salt, CURRENT_PASSWORD_VERSION),
+        CURRENT_PASSWORD_VERSION,
       ],
     );
     const user = userResult.rows[0];
@@ -245,15 +279,16 @@ export async function registerSelfServeOwner({
     const salt = randomBytes(24).toString("hex");
     const userResult = await client.query(
       `INSERT INTO platform_users (
-         email, display_name, password_salt, password_hash
+         email, display_name, password_salt, password_hash, password_version
        )
-       VALUES ($1,$2,$3,$4)
+       VALUES ($1,$2,$3,$4,$5)
        RETURNING *`,
       [
         normalizedEmail,
         display,
         salt,
-        passwordDigest(normalizedPassword, salt),
+        passwordDigest(normalizedPassword, salt, CURRENT_PASSWORD_VERSION),
+        CURRENT_PASSWORD_VERSION,
       ],
     );
     const user = userResult.rows[0];
@@ -335,13 +370,21 @@ export async function loginPlatformUser({
     );
 
     if (result.rowCount === 0) {
-      passwordDigest(normalizedPassword, DUMMY_PASSWORD_SALT);
+      passwordDigest(
+        normalizedPassword,
+        DUMMY_PASSWORD_SALT,
+        CURRENT_PASSWORD_VERSION,
+      );
       await client.query("ROLLBACK");
       return null;
     }
 
     const user = result.rows[0];
-    const digest = passwordDigest(normalizedPassword, user.password_salt);
+    const digest = passwordDigest(
+      normalizedPassword,
+      user.password_salt,
+      user.password_version || 1,
+    );
     if (
       user.status !== "ACTIVE" ||
       (user.locked_until && new Date(user.locked_until).getTime() > Date.now())
@@ -373,6 +416,7 @@ export async function loginPlatformUser({
       return null;
     }
 
+    await upgradePasswordIfNeeded(client, user, normalizedPassword);
     await client.query(
       `UPDATE platform_users
           SET failed_login_count = 0,
@@ -542,11 +586,16 @@ export async function acceptWorkspaceInvite({
       user = userResult.rows[0];
     } else {
       user = userResult.rows[0];
-      const digest = passwordDigest(normalizedPassword, user.password_salt);
+      const digest = passwordDigest(
+        normalizedPassword,
+        user.password_salt,
+        user.password_version || 1,
+      );
       if (!safeHexEqual(digest, user.password_hash)) {
         await client.query("ROLLBACK");
         return null;
       }
+      await upgradePasswordIfNeeded(client, user, normalizedPassword);
     }
 
     await client.query(
@@ -582,7 +631,7 @@ export async function authenticatePlatformToken(token) {
 
   if (raw.startsWith(SESSION_PREFIX)) {
     const result = await pool.query(
-      `SELECT s.id AS principal_id, s.user_id, s.expires_at,
+      `SELECT s.id AS principal_id, s.user_id, s.expires_at, s.csrf_hash,
               u.email, u.display_name, u.status, u.is_platform_operator
          FROM platform_sessions s
          JOIN platform_users u ON u.id = s.user_id
@@ -607,6 +656,7 @@ export async function authenticatePlatformToken(token) {
         displayName: result.rows[0].display_name,
         isPlatformOperator: Boolean(result.rows[0].is_platform_operator),
       },
+      csrfHash: result.rows[0].csrf_hash || null,
       rateLimitPerHour: 4000,
     };
   }
@@ -814,6 +864,11 @@ export async function revokePlatformSession(sessionId) {
     "UPDATE platform_sessions SET revoked_at = now() WHERE id = $1",
     [sessionId],
   );
+}
+
+export function verifyPlatformCsrf(principal, token) {
+  if (principal?.kind !== "SESSION" || !principal.csrfHash) return false;
+  return safeHexEqual(sha256(String(token || "")), principal.csrfHash);
 }
 
 export function hashPlatformToken(token) {

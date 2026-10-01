@@ -64,6 +64,10 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Generate CycloneDX SBOM
+        run: |
+          mkdir -p artifacts
+          npm sbom --sbom-format cyclonedx > artifacts/sbom.cdx.json
       - run: npm run migrate
       - run: npm run check
       - name: Synthetic benchmark
@@ -115,3 +119,4 @@ jobs:
           path: |
             artifacts/release-certification.json
             artifacts/database.backup.json
+            artifacts/sbom.cdx.json

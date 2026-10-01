@@ -85,3 +85,74 @@ test("MCP client propagates the remediation abort signal", async () => {
   assert.equal(signals.length, 3);
   assert.ok(signals.every((signal) => signal === controller.signal));
 });
+
+
+test("MCP client refreshes OAuth once after a 401 without leaking credentials", async () => {
+  const calls = [];
+  let tokenIssue = 0;
+  let mcpAttempt = 0;
+
+  const fetchImpl = async (url, options) => {
+    const target = String(url);
+    calls.push({ target, authorization: options.headers?.authorization });
+    if (target === "https://auth.example.test/token") {
+      tokenIssue += 1;
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            access_token: "oauth-token-" + tokenIssue,
+            token_type: "Bearer",
+            expires_in: 900,
+          };
+        },
+      };
+    }
+
+    mcpAttempt += 1;
+    if (mcpAttempt === 1) {
+      return response({ status: 401 });
+    }
+    if (mcpAttempt === 2) {
+      return response({
+        sessionId: "oauth-session",
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, result: {} }),
+      });
+    }
+    if (mcpAttempt === 3) return response();
+    return response({
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 2,
+        result: { ok: true },
+      }),
+    });
+  };
+
+  const client = new MecordMcpClient({
+    endpoint: "https://mcp.example.test/mcp",
+    oauth: {
+      tokenUrl: "https://auth.example.test/token",
+      clientId: "machine-client",
+      clientSecret: "machine-secret",
+      scope: "operator:read operator:write",
+      resource: "https://mcp.example.test/mcp",
+    },
+    fetchImpl,
+  });
+
+  const result = await client.callTool("operations", { action: "submit" });
+  assert.equal(result.ok, true);
+  assert.equal(tokenIssue, 2);
+  const mcpCalls = calls.filter((entry) =>
+    entry.target === "https://mcp.example.test/mcp"
+  );
+  assert.equal(mcpCalls[0].authorization, "Bearer oauth-token-1");
+  assert.equal(mcpCalls[1].authorization, "Bearer oauth-token-2");
+  assert.ok(
+    mcpCalls.slice(1).every(
+      (entry) => entry.authorization === "Bearer oauth-token-2",
+    ),
+  );
+});

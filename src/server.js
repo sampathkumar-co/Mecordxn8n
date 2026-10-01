@@ -26,7 +26,11 @@ import {
   handleMilestoneHPlatformRoute,
   runMilestoneHMaintenance,
 } from "./milestone-h/routes.js";
-import { authenticatePlatformToken } from "./platform/auth.js";
+import {
+  authenticatePlatformToken,
+  verifyPlatformCsrf,
+} from "./platform/auth.js";
+import { platformSessionTokenFromRequest } from "./platform/session-http.js";
 import {
   handlePlatformPublicRoute,
   handlePlatformRoute,
@@ -343,6 +347,7 @@ export function createServer({
 
       if (url.pathname.startsWith("/v1/platform/")) {
         const rawBearer = bearerToken(req);
+        const rawCookie = platformSessionTokenFromRequest(req);
         const milestoneHPublicHandled = await handleMilestoneHPublicRoute({
           req,
           res,
@@ -366,9 +371,19 @@ export function createServer({
         });
         if (publicHandled !== false) return;
 
-        const principal = await authenticatePlatformToken(rawBearer);
+        const authToken = rawBearer || rawCookie;
+        const principal = await authenticatePlatformToken(authToken);
         if (!principal) {
           return json(res, 401, { error: "PLATFORM_UNAUTHORIZED" });
+        }
+        const cookieAuthenticated = !rawBearer && Boolean(rawCookie);
+        const mutating = !["GET", "HEAD", "OPTIONS"].includes(req.method || "GET");
+        if (
+          cookieAuthenticated &&
+          mutating &&
+          !verifyPlatformCsrf(principal, req.headers["x-csrf-token"])
+        ) {
+          return json(res, 403, { error: "CSRF_REQUIRED" });
         }
         const integrationHandled = await handleIntegrationPlatformRoute({
           req,

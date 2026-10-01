@@ -21,12 +21,17 @@ const required = [
   "PLATFORM_MASTER_KEY",
   "PLATFORM_AUTH_KEY",
   "AUTH_MAIL_WEBHOOK_SECRET",
+  "MECORD_MCP_TOKEN",
   "BOOTSTRAP_TOKEN",
   "APP_DOMAIN",
   "ACME_EMAIL",
   "PUBLIC_APP_URL",
   "AUTH_MAIL_WEBHOOK_URL",
   "AUTH_MAIL_WEBHOOK_SECRET",
+  "MECORD_MCP_URL",
+  "MECORD_MCP_TOKEN",
+  "MECORD_HEALTH_URL",
+  "N8N_HEALTH_URL",
 ];
 
 const errors = [];
@@ -138,6 +143,34 @@ if (
   mfaStepUpMinutes > 240
 ) {
   errors.push("MFA_STEP_UP_MINUTES must be an integer from 1 to 240");
+}
+
+if (
+  String(process.env.DEPENDENCY_HEALTH_ENABLED || "").trim().toLowerCase() !==
+  "true"
+) {
+  errors.push("DEPENDENCY_HEALTH_ENABLED must be true in production");
+}
+
+for (const name of ["MECORD_MCP_URL", "MECORD_HEALTH_URL"]) {
+  if (values[name]) {
+    let dependencyUrl;
+    try { dependencyUrl = new URL(values[name]); } catch {}
+    if (!dependencyUrl || dependencyUrl.protocol !== "https:") {
+      errors.push(name + " must be an HTTPS URL");
+    }
+  }
+}
+if (values.N8N_HEALTH_URL) {
+  let n8nHealth;
+  try { n8nHealth = new URL(values.N8N_HEALTH_URL); } catch {}
+  if (
+    !n8nHealth ||
+    !["http:", "https:"].includes(n8nHealth.protocol) ||
+    !["n8n", "127.0.0.1", "localhost"].includes(n8nHealth.hostname)
+  ) {
+    errors.push("N8N_HEALTH_URL must point to the internal n8n service");
+  }
 }
 
 if (values.AUTH_MAIL_WEBHOOK_URL) {

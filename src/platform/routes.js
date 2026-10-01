@@ -48,6 +48,7 @@ import {
   setPlatformSessionCookie,
 } from "./session-http.js";
 import { decidePlatformApproval } from "./approvals.js";
+import { assertPrivilegedMfa } from "./mfa-policy.js";
 import {
   approvalBelongsToWorkspace,
   createWorkspace,
@@ -813,6 +814,7 @@ export async function handlePlatformRoute({
       minimumRole: "ADMIN",
       apiScope: "approvals:write",
     });
+    assertPrivilegedMfa(principal);
     if (!(await approvalBelongsToWorkspace(match[2], match[1]))) {
       return json(res, 404, { error: "APPROVAL_NOT_FOUND" });
     }
@@ -968,6 +970,7 @@ export async function handlePlatformRoute({
       minimumRole: "ADMIN",
       apiScope: "members:write",
     });
+    assertPrivilegedMfa(principal);
     if (principal.kind !== "SESSION") {
       return json(res, 403, { error: "SESSION_REQUIRED" });
     }
@@ -997,6 +1000,7 @@ export async function handlePlatformRoute({
       minimumRole: "OWNER",
       apiScope: "members:write",
     });
+    assertPrivilegedMfa(principal);
     const body = await readJson(req);
     const role = String(body.role || "").toUpperCase();
     if (!["ADMIN", "OPERATOR", "VIEWER"].includes(role)) {
@@ -1019,6 +1023,7 @@ export async function handlePlatformRoute({
       minimumRole: "OWNER",
       apiScope: "members:write",
     });
+    assertPrivilegedMfa(principal);
     const removed = await removeWorkspaceMember({
       workspaceId: match[1],
       userId: match[2],
@@ -1044,6 +1049,7 @@ export async function handlePlatformRoute({
       minimumRole: "ADMIN",
       apiScope: "members:write",
     });
+    assertPrivilegedMfa(principal);
     if (principal.kind !== "SESSION") {
       return json(res, 403, { error: "SESSION_REQUIRED" });
     }
@@ -1092,6 +1098,7 @@ export async function handlePlatformRoute({
       minimumRole: "ADMIN",
       apiScope: "members:write",
     });
+    assertPrivilegedMfa(principal);
     const revoked = await revokeWorkspaceApiKey(match[1], match[2]);
     if (!revoked) return json(res, 404, { error: "API_KEY_NOT_FOUND" });
     return json(res, 204, {});
@@ -1118,6 +1125,7 @@ export async function handlePlatformRoute({
       minimumRole: "OWNER",
       apiScope: "members:write",
     });
+    assertPrivilegedMfa(principal);
     const body = await readJson(req);
     const retentionDays = Number(body.retentionDays);
     if (
@@ -1142,6 +1150,7 @@ export async function handlePlatformRoute({
       minimumRole: "OWNER",
       apiScope: "members:write",
     });
+    assertPrivilegedMfa(principal);
     if (principal.kind !== "SESSION") {
       return json(res, 403, { error: "SESSION_REQUIRED" });
     }

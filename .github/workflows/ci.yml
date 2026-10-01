@@ -51,6 +51,64 @@ jobs:
       - name: Validate Docker Compose
         run: docker compose --env-file .env.example config >/dev/null
 
+  ui-browser:
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.63.0-noble
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: mecordxn8n_ui
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd "pg_isready -U postgres -d mecordxn8n_ui"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/mecordxn8n_ui
+      PORT: 8080
+      ORCHESTRATOR_TOKEN: ui-browser-orchestrator-token-with-32-characters
+      WORKER_TOKEN: ui-browser-worker-token-with-at-least-32-characters
+      BOOTSTRAP_TOKEN: ui-browser-bootstrap-token-with-at-least-32-characters
+      PLATFORM_MASTER_KEY: ui-browser-master-key-with-at-least-32-characters
+      PLATFORM_AUTH_KEY: ui-browser-auth-key-with-at-least-32-characters
+      PUBLIC_APP_URL: http://127.0.0.1:8080
+      UI_SMOKE_BASE_URL: http://127.0.0.1:8080
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run migrate
+      - name: Start Control API
+        run: |
+          node src/server.js >/tmp/mecordxn8n-ui-server.log 2>&1 &
+          echo $! >/tmp/mecordxn8n-ui-server.pid
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/livez >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/mecordxn8n-ui-server.log
+          exit 1
+      - name: Browser UX certification
+        run: node scripts/ui-browser-smoke.mjs
+      - name: Print server log on failure
+        if: failure()
+        run: cat /tmp/mecordxn8n-ui-server.log || true
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        if: always()
+        with:
+          name: ui-browser-certification
+          path: artifacts/ui-browser
+          if-no-files-found: ignore
+
   browser-image:
     runs-on: ubuntu-latest
 

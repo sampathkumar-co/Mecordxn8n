@@ -33,8 +33,22 @@ test("host Caddy renderer rejects unsafe public URLs and ports", () => {
       publicAppUrl: "https://mecord.example.test:8443",
       controlApiHostPort: 18080,
     }),
-    /canonical HTTPS/,
+    /origin-only canonical HTTPS/,
   );
+  for (const publicAppUrl of [
+    "https://mecord.example.test/subpath",
+    "https://mecord.example.test/?debug=1",
+    "https://mecord.example.test/#fragment",
+    "https://user:pass@mecord.example.test/",
+  ]) {
+    assert.throws(
+      () => renderHostCaddy({
+        publicAppUrl,
+        controlApiHostPort: 18080,
+      }),
+      /origin-only canonical HTTPS/,
+    );
+  }
   assert.throws(
     () => renderHostCaddy({
       publicAppUrl: "https://mecord.example.test",

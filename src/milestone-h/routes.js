@@ -399,6 +399,14 @@ export async function handleMilestoneHPlatformRoute({
     if (!center) return json(res, 404, { error: "TARGET_NOT_FOUND" });
     const body = await readJson(req);
     const normalized = normalizeAuthorizationUpdate(body, center.target, badRequest);
+    if (normalized.mode === AUTHORIZATION_MODES.BUG_BOUNTY) {
+      if (!principal.user?.isPlatformOperator) {
+        return json(res, 403, { error: "OPERATOR_VERIFICATION_REQUIRED" });
+      }
+      if (!normalized.evidenceReference || !normalized.expiresAt) {
+        return json(res, 400, { error: "BUG_BOUNTY_EVIDENCE_REQUIRED" });
+      }
+    }
     const privileged =
       normalized.mode === AUTHORIZATION_MODES.CLIENT_AUTHORIZED ||
       normalized.allowedCapabilities.includes(CAPABILITIES.SOURCE_REMEDIATION);
@@ -452,6 +460,15 @@ export async function handleMilestoneHPlatformRoute({
     if (!center) return json(res, 404, { error: "TARGET_NOT_FOUND" });
     const authorization = await getCurrentAuthorization(match[2]);
     if (!authorization) return json(res, 409, { error: "AUTHORIZATION_REQUIRED" });
+    if (
+      authorization.mode !== AUTHORIZATION_MODES.BUG_BOUNTY &&
+      !(await hasVerifiedDomain({
+        workspaceId: match[1],
+        targetId: match[2],
+      }))
+    ) {
+      return json(res, 409, { error: "DOMAIN_VERIFICATION_REQUIRED" });
+    }
     const urlToTest = center.target.base_url;
     const jobs = {};
     if (authorization.allowedCapabilities.includes(CAPABILITIES.PUBLIC_HTTP_OBSERVE)) {

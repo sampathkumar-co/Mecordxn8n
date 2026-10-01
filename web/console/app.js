@@ -233,10 +233,31 @@ function authPanel(name){
 
 $("#login-form").addEventListener("submit",async(event)=>{
   event.preventDefault();
+  const submit=$("#login-submit");
+  submit.disabled=true;
   try{
-    const result=await api("/v1/platform/auth/login",{method:"POST",body:JSON.stringify({email:$("#login-email").value,password:$("#login-password").value})});
-    setBrowserSession(result);await boot();
+    const result=await api("/v1/platform/auth/login",{method:"POST",body:JSON.stringify({
+      email:$("#login-email").value,
+      password:$("#login-password").value,
+      mfaCode:$("#login-mfa-row").classList.contains("hidden") ? null : $("#login-mfa-code").value,
+    })});
+    if(result.mfaRequired){
+      $("#login-mfa-row").classList.remove("hidden");
+      $("#login-mfa-code").required=true;
+      $("#login-mfa-code").focus();
+      submit.textContent="Verify and sign in";
+      toast("Enter your authenticator code or one-time recovery code.");
+      return;
+    }
+    setBrowserSession(result);
+    $("#login-mfa-row").classList.add("hidden");
+    $("#login-mfa-code").required=false;
+    $("#login-mfa-code").value="";
+    submit.textContent="Sign in";
+    if(result.recoveryCodeUsed) toast("Recovery code used. Store your remaining recovery codes safely.");
+    await boot();
   }catch(error){toast(error.message,true);}
+  finally{submit.disabled=false;}
 });
 
 $("#signup-form").addEventListener("submit",async(event)=>{

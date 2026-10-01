@@ -34,7 +34,10 @@ import {
   revokePlatformSession,
   revokePlatformUserSession,
 } from "./auth.js";
-import { consumePublicRateLimit } from "../milestone-h/repository.js";
+import {
+  consumePublicRateLimit,
+  hasVerifiedDomain,
+} from "../milestone-h/repository.js";
 import {
   clearPlatformSessionCookie,
   setPlatformSessionCookie,
@@ -130,6 +133,16 @@ function normalizeTarget(body, badRequest) {
   }
   if (!Object.values(AUTHORIZATION_MODES).includes(authorization.mode)) {
     throw badRequest("authorization.mode is invalid");
+  }
+  if (
+    ![
+      AUTHORIZATION_MODES.PUBLIC_QA_ONLY,
+      AUTHORIZATION_MODES.DO_NOT_TEST,
+    ].includes(authorization.mode)
+  ) {
+    throw badRequest(
+      "self-serve target registration supports PUBLIC_QA_ONLY or DO_NOT_TEST; privileged modes require a verified authorization upgrade",
+    );
   }
   const allowedHosts = Array.isArray(authorization.allowedHosts)
     ? [...new Set(
@@ -251,6 +264,21 @@ async function requireWorkspace(principal, workspaceId, rule = {}) {
     throw error;
   }
   return access;
+}
+
+async function requireTargetExecutionAuthority({
+  workspaceId,
+  targetId,
+  authorization,
+}) {
+  if (authorization?.mode === AUTHORIZATION_MODES.BUG_BOUNTY) return;
+  if (await hasVerifiedDomain({ workspaceId, targetId })) return;
+  const error = new Error(
+    "domain ownership verification or operator-validated bug-bounty authorization is required before execution",
+  );
+  error.statusCode = 409;
+  error.code = "DOMAIN_VERIFICATION_REQUIRED";
+  throw error;
 }
 
 export async function handlePlatformPublicRoute({
@@ -479,6 +507,11 @@ export async function handlePlatformRoute({
       return json(res, 403, { error: "APPROVAL_REQUIRED" });
     }
     const authorization = await getCurrentAuthorization(body.targetId);
+    await requireTargetExecutionAuthority({
+      workspaceId: match[1],
+      targetId: body.targetId,
+      authorization,
+    });
     const decision = authorize({
       authorization,
       requestedCapability: body.capability,
@@ -607,6 +640,11 @@ export async function handlePlatformRoute({
     const target = await getTarget(match[2]);
     const requestedUrl = body.requestedUrl || target.baseUrl;
     const authorization = await getCurrentAuthorization(target.id);
+    await requireTargetExecutionAuthority({
+      workspaceId: match[1],
+      targetId: target.id,
+      authorization,
+    });
     authorize({
       authorization,
       requestedCapability: body.capability,
@@ -638,8 +676,17 @@ export async function handlePlatformRoute({
       apiScope: "targets:write",
     });
     const operations = await listWorkspaceOperations(match[1], 500);
-    if (!operations.monitors.some((item) => item.id === match[2])) {
+    const monitor = operations.monitors.find((item) => item.id === match[2]);
+    if (!monitor) {
       return json(res, 404, { error: "MONITOR_NOT_FOUND" });
+    }
+    if (match[3] === "enable") {
+      const authorization = await getCurrentAuthorization(monitor.target_id);
+      await requireTargetExecutionAuthority({
+        workspaceId: match[1],
+        targetId: monitor.target_id,
+        authorization,
+      });
     }
     const policy = await setMonitoringPolicyEnabled(
       match[2],

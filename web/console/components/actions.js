@@ -17,7 +17,7 @@ export function openTargetForm() {
       <div class="form-grid">
         <label>Organization<input name="organizationName" maxlength="240" required></label>
         <label>Base URL<input name="baseUrl" type="url" placeholder="https://example.com" required></label>
-        <label>Authorization mode<select name="mode"><option>PUBLIC_QA_ONLY</option><option>BUG_BOUNTY</option><option>DO_NOT_TEST</option></select></label>
+        <label>Authorization mode<select name="mode"><option>PUBLIC_QA_ONLY</option><option>DO_NOT_TEST</option></select></label>
         <label>Expires at<input name="expiresAt" type="datetime-local"></label>
         <label class="full">Scope notes<textarea name="scopeNotes" rows="3" maxlength="2000"></textarea></label>
         <label class="full">Evidence reference<input name="evidenceReference" maxlength="1000" placeholder="Contract, bounty program, ticket, or other authorization evidence"></label>
@@ -58,6 +58,9 @@ export async function openAuthorizationCenter(targetId) {
   const current = center.currentAuthorization;
   const verified = (center.domainVerifications || []).some((item) => item.status === "VERIFIED");
   const access = permission("ADMIN", { operational: true });
+  const operatorOption = state.me?.principal?.user?.isPlatformOperator
+    ? "<option>BUG_BOUNTY</option>"
+    : "";
   const history = (center.authorizationHistory || []).slice(0, 12);
   openModal("Authorization center", "TARGET TRUST BOUNDARY", `
     <div class="detail-grid">
@@ -75,7 +78,7 @@ export async function openAuthorizationCenter(targetId) {
     <h3 class="mt-16">Replace authorization</h3>
     <form id="auth-upgrade-form">
       <div class="form-grid">
-        <label>Mode<select name="mode"><option>PUBLIC_QA_ONLY</option><option>BUG_BOUNTY</option><option>CLIENT_AUTHORIZED</option><option>DO_NOT_TEST</option></select></label>
+        <label>Mode<select name="mode"><option>PUBLIC_QA_ONLY</option>${operatorOption}<option>CLIENT_AUTHORIZED</option><option>DO_NOT_TEST</option></select></label>
         <label>Expires at<input name="expiresAt" type="datetime-local"></label>
         <label class="full">Evidence reference<input name="evidenceReference" maxlength="1000" placeholder="Contract, signed scope, program reference"></label>
         <label><span class="filters"><input name="browser" type="checkbox" class="check-input" checked> Browser QA</span></label>

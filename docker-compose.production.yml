@@ -20,8 +20,6 @@ services:
     depends_on:
       control-api:
         condition: service_started
-      n8n:
-        condition: service_started
     ports:
       - "80:80"
       - "443:443"
@@ -30,6 +28,8 @@ services:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
+    networks:
+      - edge
 
 volumes:
   caddy_data:

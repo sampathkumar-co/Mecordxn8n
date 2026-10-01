@@ -1,3 +1,10 @@
+x-node-hardening: &node-hardening
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  pids_limit: 256
+
 services:
   postgres:
     image: postgres:17-alpine
@@ -13,16 +20,45 @@ services:
       interval: 5s
       timeout: 5s
       retries: 12
+    networks:
+      - app-db
+
+  n8n-postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${N8N_POSTGRES_DB}
+      POSTGRES_USER: ${N8N_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${N8N_POSTGRES_PASSWORD}
+    volumes:
+      - n8n_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${N8N_POSTGRES_USER} -d ${N8N_POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks:
+      - n8n-db
 
   control-api:
+    <<: *node-hardening
     build: .
     restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
     environment:
       PORT: 8080
       DATABASE_URL: ${DATABASE_URL}
       DB_POOL_MAX: ${DB_POOL_MAX:-10}
       ORCHESTRATOR_TOKEN: ${ORCHESTRATOR_TOKEN}
-      WORKER_TOKEN: ${WORKER_TOKEN}
+      WORKER_TOKEN_HTTP_OBSERVER: ${WORKER_TOKEN_HTTP_OBSERVER}
+      WORKER_TOKEN_BROWSER_QA: ${WORKER_TOKEN_BROWSER_QA}
+      WORKER_TOKEN_SITE_DISCOVERY: ${WORKER_TOKEN_SITE_DISCOVERY}
+      WORKER_TOKEN_JOURNEY_QA: ${WORKER_TOKEN_JOURNEY_QA}
+      WORKER_TOKEN_FINDING_VERIFICATION: ${WORKER_TOKEN_FINDING_VERIFICATION}
+      WORKER_TOKEN_REMEDIATION: ${WORKER_TOKEN_REMEDIATION}
+      WORKER_TOKEN_INTEGRATION: ${WORKER_TOKEN_INTEGRATION}
       BOOTSTRAP_TOKEN: ${BOOTSTRAP_TOKEN}
       PLATFORM_MASTER_KEY: ${PLATFORM_MASTER_KEY}
       PUBLIC_APP_URL: ${PUBLIC_APP_URL:-}
@@ -37,28 +73,52 @@ services:
     command: sh -c "node scripts/migrate.mjs && node src/server.js"
     ports:
       - "127.0.0.1:8080:8080"
+    networks:
+      - edge
+      - app-db
+      - http-observer-net
+      - browser-qa-net
+      - site-discovery-net
+      - journey-qa-net
+      - verification-net
+      - remediation-net
+      - integration-net
 
   http-observer:
+    <<: *node-hardening
     build: .
     restart: unless-stopped
-    environment: &worker-env
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+    environment:
       MECORDXN8N_CONTROL_API_URL: http://control-api:8080
-      WORKER_TOKEN: ${WORKER_TOKEN}
+      WORKER_TOKEN: ${WORKER_TOKEN_HTTP_OBSERVER}
       WORKER_TRIGGER_TOKEN: ${WORKER_TRIGGER_TOKEN}
+      WORKER_ID: public-http-observer
+      WORKER_PORT: 8090
     depends_on:
       control-api:
         condition: service_started
     command: node src/workers/http-observer-service.js
+    networks:
+      - http-observer-net
 
   browser-qa:
+    <<: *node-hardening
     build: &browser-build
       context: .
       dockerfile: Dockerfile.browser
     restart: unless-stopped
     user: pwuser
     shm_size: "1gb"
+    tmpfs:
+      - /tmp:rw,nosuid,size=256m
+      - /home/pwuser/.cache:rw,nosuid,size=128m
     environment:
-      <<: *worker-env
+      MECORDXN8N_CONTROL_API_URL: http://control-api:8080
+      WORKER_TOKEN: ${WORKER_TOKEN_BROWSER_QA}
+      WORKER_TRIGGER_TOKEN: ${WORKER_TRIGGER_TOKEN}
       WORKER_ID: browser-qa-worker
       WORKER_PORT: 8091
       ARTIFACT_DIR: /artifacts
@@ -67,15 +127,23 @@ services:
         condition: service_started
     command: node src/workers/browser-qa-service.js
     volumes:
-      - artifacts_data:/artifacts
+      - browser_artifacts:/artifacts
+    networks:
+      - browser-qa-net
 
   site-discovery:
+    <<: *node-hardening
     build: *browser-build
     restart: unless-stopped
     user: pwuser
     shm_size: "1gb"
+    tmpfs:
+      - /tmp:rw,nosuid,size=256m
+      - /home/pwuser/.cache:rw,nosuid,size=128m
     environment:
-      <<: *worker-env
+      MECORDXN8N_CONTROL_API_URL: http://control-api:8080
+      WORKER_TOKEN: ${WORKER_TOKEN_SITE_DISCOVERY}
+      WORKER_TRIGGER_TOKEN: ${WORKER_TRIGGER_TOKEN}
       WORKER_ID: site-discovery-worker
       WORKER_PORT: 8092
       ARTIFACT_DIR: /artifacts
@@ -84,15 +152,23 @@ services:
         condition: service_started
     command: node src/workers/site-discovery-service.js
     volumes:
-      - artifacts_data:/artifacts
+      - discovery_artifacts:/artifacts
+    networks:
+      - site-discovery-net
 
   journey-qa:
+    <<: *node-hardening
     build: *browser-build
     restart: unless-stopped
     user: pwuser
     shm_size: "1gb"
+    tmpfs:
+      - /tmp:rw,nosuid,size=256m
+      - /home/pwuser/.cache:rw,nosuid,size=128m
     environment:
-      <<: *worker-env
+      MECORDXN8N_CONTROL_API_URL: http://control-api:8080
+      WORKER_TOKEN: ${WORKER_TOKEN_JOURNEY_QA}
+      WORKER_TRIGGER_TOKEN: ${WORKER_TRIGGER_TOKEN}
       WORKER_ID: journey-qa-worker
       WORKER_PORT: 8093
       ARTIFACT_DIR: /artifacts
@@ -101,15 +177,23 @@ services:
         condition: service_started
     command: node src/workers/journey-qa-service.js
     volumes:
-      - artifacts_data:/artifacts
+      - journey_artifacts:/artifacts
+    networks:
+      - journey-qa-net
 
   finding-verification:
+    <<: *node-hardening
     build: *browser-build
     restart: unless-stopped
     user: pwuser
     shm_size: "1gb"
+    tmpfs:
+      - /tmp:rw,nosuid,size=256m
+      - /home/pwuser/.cache:rw,nosuid,size=128m
     environment:
-      <<: *worker-env
+      MECORDXN8N_CONTROL_API_URL: http://control-api:8080
+      WORKER_TOKEN: ${WORKER_TOKEN_FINDING_VERIFICATION}
+      WORKER_TRIGGER_TOKEN: ${WORKER_TRIGGER_TOKEN}
       WORKER_ID: finding-verification-worker
       WORKER_PORT: 8094
       ARTIFACT_DIR: /artifacts
@@ -118,13 +202,21 @@ services:
         condition: service_started
     command: node src/workers/finding-verification-service.js
     volumes:
-      - artifacts_data:/artifacts
+      - verification_artifacts:/artifacts
+    networks:
+      - verification-net
 
   remediation:
+    <<: *node-hardening
     build: .
     restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
     environment:
-      <<: *worker-env
+      MECORDXN8N_CONTROL_API_URL: http://control-api:8080
+      WORKER_TOKEN: ${WORKER_TOKEN_REMEDIATION}
+      WORKER_TRIGGER_TOKEN: ${WORKER_TRIGGER_TOKEN}
       WORKER_ID: mecord-remediation-worker
       WORKER_PORT: 8095
       MECORD_MCP_URL: ${MECORD_MCP_URL:-}
@@ -134,29 +226,40 @@ services:
       control-api:
         condition: service_started
     command: node src/workers/remediation-service.js
+    networks:
+      - remediation-net
 
   integration-delivery:
+    <<: *node-hardening
     build: .
     restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
     environment:
-      <<: *worker-env
+      MECORDXN8N_CONTROL_API_URL: http://control-api:8080
+      WORKER_TOKEN: ${WORKER_TOKEN_INTEGRATION}
+      WORKER_TRIGGER_TOKEN: ${WORKER_TRIGGER_TOKEN}
       WORKER_ID: integration-delivery-worker
       WORKER_PORT: 8096
     depends_on:
       control-api:
         condition: service_started
     command: node src/workers/integration-service.js
+    networks:
+      - integration-net
 
   n8n:
+    <<: *node-hardening
     image: docker.n8n.io/n8nio/n8n:2.40.7
     restart: unless-stopped
     environment:
       DB_TYPE: postgresdb
-      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_HOST: n8n-postgres
       DB_POSTGRESDB_PORT: 5432
-      DB_POSTGRESDB_DATABASE: ${POSTGRES_DB}
-      DB_POSTGRESDB_USER: ${POSTGRES_USER}
-      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_POSTGRESDB_DATABASE: ${N8N_POSTGRES_DB}
+      DB_POSTGRESDB_USER: ${N8N_POSTGRES_USER}
+      DB_POSTGRESDB_PASSWORD: ${N8N_POSTGRES_PASSWORD}
       N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY}
       N8N_HOST: ${N8N_HOST:-localhost}
       N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
@@ -175,7 +278,7 @@ services:
       MECORDXN8N_INTEGRATION_URL: http://integration-delivery:8096
       MECORDXN8N_WORKER_TRIGGER_TOKEN: ${WORKER_TRIGGER_TOKEN}
     depends_on:
-      postgres:
+      n8n-postgres:
         condition: service_healthy
       control-api:
         condition: service_started
@@ -183,9 +286,35 @@ services:
       - "127.0.0.1:5678:5678"
     volumes:
       - n8n_data:/home/node/.n8n
-      - artifacts_data:/artifacts:ro
+    networks:
+      - n8n-db
+      - http-observer-net
+      - browser-qa-net
+      - site-discovery-net
+      - journey-qa-net
+      - verification-net
+      - remediation-net
+      - integration-net
 
 volumes:
   postgres_data:
+  n8n_postgres_data:
   n8n_data:
-  artifacts_data:
+  browser_artifacts:
+  discovery_artifacts:
+  journey_artifacts:
+  verification_artifacts:
+
+networks:
+  edge:
+  app-db:
+    internal: true
+  n8n-db:
+    internal: true
+  http-observer-net:
+  browser-qa-net:
+  site-discovery-net:
+  journey-qa-net:
+  verification-net:
+  remediation-net:
+  integration-net:

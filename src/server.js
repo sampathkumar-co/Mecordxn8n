@@ -48,6 +48,10 @@ import {
   buildWorkerCredentials,
   workerPathAllowed,
 } from "./workers/identity.js";
+import {
+  attachRequestLogging,
+  logUnhandledRequestError,
+} from "./observability.js";
 
 const MAX_BODY_BYTES = 256 * 1024;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -316,8 +320,11 @@ export function createServer({
   }
 
   const server = http.createServer(async (req, res) => {
+    let requestPath = "/";
     try {
       const url = new URL(req.url, "http://localhost");
+      requestPath = url.pathname;
+      attachRequestLogging(req, res, requestPath);
 
       if (req.method === "GET" && url.pathname === "/livez") {
         return json(res, 200, { ok: true });
@@ -588,6 +595,9 @@ export function createServer({
       return json(res, 404, { error: "NOT_FOUND" });
     } catch (error) {
       const statusCode = error.statusCode || 500;
+      if (statusCode >= 500) {
+        logUnhandledRequestError(error, req, res, requestPath);
+      }
       return json(res, statusCode, {
         error: statusCode >= 500 ? "INTERNAL_ERROR" : (error.code || "BAD_REQUEST"),
         message: statusCode >= 500 ? "unexpected server error" : error.message,

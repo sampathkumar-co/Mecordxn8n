@@ -20,6 +20,8 @@ const INVITE_TTL_HOURS = 72;
 const SESSION_PREFIX = "mcs_";
 const CSRF_PREFIX = "mcc_";
 const API_KEY_PREFIX = "mck_";
+const EMAIL_VERIFY_PREFIX = "mcv_";
+const PASSWORD_RESET_PREFIX = "mpr_";
 const CURRENT_PASSWORD_VERSION = 2;
 const DUMMY_PASSWORD_SALT =
   "000000000000000000000000000000000000000000000000";
@@ -117,6 +119,7 @@ function publicUser(row) {
     email: row.email,
     displayName: row.display_name,
     status: row.status,
+    emailVerified: Boolean(row.email_verified_at),
     isPlatformOperator: Boolean(row.is_platform_operator),
   };
 }
@@ -197,9 +200,9 @@ export async function bootstrapPlatformOwner({
     const userResult = await client.query(
       `INSERT INTO platform_users (
          email, display_name, password_salt, password_hash,
-         password_version, is_platform_operator
+         password_version, is_platform_operator, email_verified_at
        )
-       VALUES ($1,$2,$3,$4,$5,true)
+       VALUES ($1,$2,$3,$4,$5,true,now())
        RETURNING *`,
       [
         normalizedEmail,
@@ -616,9 +619,10 @@ export async function acceptWorkspaceInvite({
       const salt = randomBytes(24).toString("hex");
       userResult = await client.query(
         `INSERT INTO platform_users (
-           email, display_name, password_salt, password_hash, password_version
+           email, display_name, password_salt, password_hash, password_version,
+           email_verified_at
          )
-         VALUES ($1,$2,$3,$4,$5)
+         VALUES ($1,$2,$3,$4,$5,now())
          RETURNING *`,
         [
           invite.email,
@@ -641,6 +645,13 @@ export async function acceptWorkspaceInvite({
         return null;
       }
       await upgradePasswordIfNeeded(client, user, normalizedPassword);
+      if (!user.email_verified_at) {
+        await client.query(
+          "UPDATE platform_users SET email_verified_at = now(), updated_at = now() WHERE id = $1",
+          [user.id],
+        );
+        user.email_verified_at = new Date();
+      }
     }
 
     await client.query(
@@ -679,6 +690,7 @@ export async function authenticatePlatformToken(token) {
       `SELECT s.id AS principal_id, s.user_id, s.expires_at, s.csrf_hash,
               s.mfa_verified_at,
               u.email, u.display_name, u.status, u.is_platform_operator,
+              u.email_verified_at,
               (m.enabled_at IS NOT NULL) AS mfa_enabled
          FROM platform_sessions s
          JOIN platform_users u ON u.id = s.user_id
@@ -702,6 +714,7 @@ export async function authenticatePlatformToken(token) {
         id: result.rows[0].user_id,
         email: result.rows[0].email,
         displayName: result.rows[0].display_name,
+        emailVerified: Boolean(result.rows[0].email_verified_at),
         isPlatformOperator: Boolean(result.rows[0].is_platform_operator),
       },
       csrfHash: result.rows[0].csrf_hash || null,
@@ -736,6 +749,226 @@ export async function authenticatePlatformToken(token) {
   }
 
   return null;
+}
+
+async function issuePlatformAuthToken(client, { userId, kind }) {
+  const config = kind === "EMAIL_VERIFY"
+    ? { prefix: EMAIL_VERIFY_PREFIX, minutes: 30 }
+    : kind === "PASSWORD_RESET"
+      ? { prefix: PASSWORD_RESET_PREFIX, minutes: 20 }
+      : null;
+  if (!config) throw new Error("unsupported platform auth token kind");
+
+  await client.query(
+    `UPDATE platform_auth_tokens
+        SET consumed_at = COALESCE(consumed_at, now())
+      WHERE user_id = $1
+        AND kind = $2
+        AND consumed_at IS NULL`,
+    [userId, kind],
+  );
+
+  const token = randomToken(config.prefix);
+  const result = await client.query(
+    `INSERT INTO platform_auth_tokens (
+       user_id, kind, token_hash, expires_at
+     )
+     VALUES ($1,$2,$3,now() + ($4 * interval '1 minute'))
+     RETURNING expires_at`,
+    [userId, kind, sha256(token), config.minutes],
+  );
+  return {
+    token,
+    expiresAt: result.rows[0].expires_at,
+  };
+}
+
+export async function createEmailVerificationToken(userId) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const user = await client.query(
+      `SELECT * FROM platform_users
+        WHERE id = $1
+          AND status = 'ACTIVE'
+        FOR UPDATE`,
+      [userId],
+    );
+    if (user.rowCount === 0 || user.rows[0].email_verified_at) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+    const issued = await issuePlatformAuthToken(client, {
+      userId,
+      kind: "EMAIL_VERIFY",
+    });
+    await client.query("COMMIT");
+    return {
+      ...issued,
+      user: publicUser(user.rows[0]),
+    };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function requestPasswordResetToken(email) {
+  const normalizedEmail = normalizeEmail(email);
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const user = await client.query(
+      `SELECT * FROM platform_users
+        WHERE lower(email) = $1
+          AND status = 'ACTIVE'
+        FOR UPDATE`,
+      [normalizedEmail],
+    );
+    if (user.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+    const issued = await issuePlatformAuthToken(client, {
+      userId: user.rows[0].id,
+      kind: "PASSWORD_RESET",
+    });
+    await client.query("COMMIT");
+    return {
+      ...issued,
+      user: publicUser(user.rows[0]),
+    };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function verifyEmailWithToken(token) {
+  const raw = String(token || "");
+  if (!raw.startsWith(EMAIL_VERIFY_PREFIX)) return false;
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const found = await client.query(
+      `SELECT t.id, t.user_id
+         FROM platform_auth_tokens t
+         JOIN platform_users u ON u.id = t.user_id
+        WHERE t.token_hash = $1
+          AND t.kind = 'EMAIL_VERIFY'
+          AND t.consumed_at IS NULL
+          AND t.expires_at > now()
+          AND u.status = 'ACTIVE'
+        FOR UPDATE OF t, u`,
+      [sha256(raw)],
+    );
+    if (found.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return false;
+    }
+    await client.query(
+      `UPDATE platform_users
+          SET email_verified_at = COALESCE(email_verified_at, now()),
+              updated_at = now()
+        WHERE id = $1`,
+      [found.rows[0].user_id],
+    );
+    await client.query(
+      "UPDATE platform_auth_tokens SET consumed_at = now() WHERE id = $1",
+      [found.rows[0].id],
+    );
+    await client.query("COMMIT");
+    return true;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function resetPasswordWithToken({ token, password }) {
+  const raw = String(token || "");
+  if (!raw.startsWith(PASSWORD_RESET_PREFIX)) return false;
+  const normalizedPassword = validatePassword(password);
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const found = await client.query(
+      `SELECT t.id, t.user_id
+         FROM platform_auth_tokens t
+         JOIN platform_users u ON u.id = t.user_id
+        WHERE t.token_hash = $1
+          AND t.kind = 'PASSWORD_RESET'
+          AND t.consumed_at IS NULL
+          AND t.expires_at > now()
+          AND u.status = 'ACTIVE'
+        FOR UPDATE OF t, u`,
+      [sha256(raw)],
+    );
+    if (found.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return false;
+    }
+
+    const salt = randomBytes(24).toString("hex");
+    const digest = passwordDigest(
+      normalizedPassword,
+      salt,
+      CURRENT_PASSWORD_VERSION,
+    );
+    await client.query(
+      `UPDATE platform_users
+          SET password_salt = $2,
+              password_hash = $3,
+              password_version = $4,
+              failed_login_count = 0,
+              locked_until = NULL,
+              email_verified_at = COALESCE(email_verified_at, now()),
+              updated_at = now()
+        WHERE id = $1`,
+      [
+        found.rows[0].user_id,
+        salt,
+        digest,
+        CURRENT_PASSWORD_VERSION,
+      ],
+    );
+    await client.query(
+      `UPDATE platform_sessions
+          SET revoked_at = COALESCE(revoked_at, now())
+        WHERE user_id = $1`,
+      [found.rows[0].user_id],
+    );
+    await client.query(
+      `UPDATE platform_auth_tokens
+          SET consumed_at = COALESCE(consumed_at, now())
+        WHERE user_id = $1
+          AND kind = 'PASSWORD_RESET'
+          AND consumed_at IS NULL`,
+      [found.rows[0].user_id],
+    );
+    await client.query("COMMIT");
+    return true;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function purgeExpiredPlatformAuthTokens() {
+  const result = await pool.query(
+    `DELETE FROM platform_auth_tokens
+      WHERE expires_at < now() - interval '24 hours'
+         OR consumed_at < now() - interval '24 hours'`,
+  );
+  return result.rowCount;
 }
 
 export async function consumePlatformRateLimit(principal) {

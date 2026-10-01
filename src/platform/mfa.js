@@ -76,6 +76,10 @@ function totpCode(secret, timestampMs = Date.now()) {
   return String(number % 1_000_000).padStart(6, "0");
 }
 
+export function generateTotpCode(secret, now = Date.now()) {
+  return totpCode(secret, now);
+}
+
 export function verifyTotpCode(secret, code, now = Date.now()) {
   const candidate = String(code || "").replace(/\s+/g, "");
   if (!/^\d{6}$/.test(candidate)) return false;

@@ -28,6 +28,7 @@ import {
   verifyStripeSignature,
 } from "./billing.js";
 import { verifyDnsTxtOwnership } from "./domain.js";
+import { setPlatformSessionCookie } from "../platform/session-http.js";
 import {
   completeBillingCheckout,
   completeDomainVerification,
@@ -191,6 +192,7 @@ export async function handleMilestoneHPublicRoute({
         workspaceSlug: body.workspaceSlug || body.workspaceName,
         userAgent: req.headers["user-agent"] || "",
       });
+      setPlatformSessionCookie(res, result.token, result.expiresAt);
       return json(res, 201, result);
     } catch (error) {
       if (error.code === "23505" || error.code === "ACCOUNT_EXISTS") {

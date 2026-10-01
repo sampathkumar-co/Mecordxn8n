@@ -1,3 +1,4 @@
+import { assertPrivilegedMfa } from "../platform/mfa-policy.js";
 import {
   createHash,
   createHmac,
@@ -153,6 +154,7 @@ export async function handleIntegrationPlatformRoute({
       minimumRole: "ADMIN",
       apiScope: "integrations:write",
     });
+    assertPrivilegedMfa(principal);
     if (principal.kind !== "SESSION") {
       return json(res, 403, { error: "SESSION_REQUIRED" });
     }
@@ -191,6 +193,7 @@ export async function handleIntegrationPlatformRoute({
       minimumRole: "ADMIN",
       apiScope: "integrations:write",
     });
+    assertPrivilegedMfa(principal);
     const connection = await setIntegrationConnectionStatus({
       workspaceId,
       connectionId: path[5],
@@ -212,6 +215,7 @@ export async function handleIntegrationPlatformRoute({
       minimumRole: "ADMIN",
       apiScope: "integrations:write",
     });
+    assertPrivilegedMfa(principal);
     const context = await getIntegrationConnection(path[5], workspaceId);
     if (!context) return json(res, 404, { error: "INTEGRATION_NOT_FOUND" });
     if (context.connection.provider === "STRIPE") {

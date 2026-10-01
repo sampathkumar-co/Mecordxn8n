@@ -43,7 +43,8 @@
         </div>
         <label>Email<input id="login-email" name="email" type="email" autocomplete="username" required></label>
         <label>Password<input id="login-password" name="password" type="password" autocomplete="current-password" minlength="12" required></label>
-        <button class="button primary" type="submit">Sign in</button>
+        <label id="login-mfa-row" class="hidden">Authenticator or recovery code<input id="login-mfa-code" name="mfaCode" autocomplete="one-time-code" inputmode="numeric" maxlength="64"></label>
+        <button id="login-submit" class="button primary" type="submit">Sign in</button>
         <button id="show-signup" class="button text" type="button">New customer? Start free trial</button>
         <button id="show-bootstrap" class="button text" type="button">First deployment? Bootstrap owner</button>
       </form>

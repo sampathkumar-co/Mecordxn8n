@@ -19,6 +19,7 @@ import { buildClientProposal } from "../milestone-a/report.js";
 import {
   registerSelfServeOwner,
   accessAllows,
+  createEmailVerificationToken,
   getWorkspaceAccess,
 } from "../platform/auth.js";
 import { getWorkspaceSubscription } from "../platform/repository.js";
@@ -30,6 +31,7 @@ import {
 } from "./billing.js";
 import { verifyDnsTxtOwnership } from "./domain.js";
 import { setPlatformSessionCookie } from "../platform/session-http.js";
+import { deliverAuthMail } from "../platform/auth-mail.js";
 import {
   completeBillingCheckout,
   completeDomainVerification,
@@ -202,7 +204,27 @@ export async function handleMilestoneHPublicRoute({
         userAgent: req.headers["user-agent"] || "",
       });
       setPlatformSessionCookie(res, result.token, result.expiresAt);
-      return json(res, 201, browserSessionResponse(req, result));
+      let verificationDelivery = { configured: false, delivered: false };
+      try {
+        const verification = await createEmailVerificationToken(result.user.id);
+        if (verification) {
+          verificationDelivery = await deliverAuthMail({
+            kind: "EMAIL_VERIFY",
+            email: result.user.email,
+            token: verification.token,
+            expiresAt: verification.expiresAt,
+          });
+        }
+      } catch {
+        verificationDelivery = { configured: true, delivered: false };
+      }
+      return json(res, 201, {
+        ...browserSessionResponse(req, result),
+        emailVerification: {
+          required: !result.user.emailVerified,
+          delivered: Boolean(verificationDelivery.delivered),
+        },
+      });
     } catch (error) {
       if (error.code === "23505" || error.code === "ACCOUNT_EXISTS") {
         return json(res, 409, { error: "SIGNUP_CONFLICT" });

@@ -54,18 +54,18 @@ export function renderHostCaddy({
   return `${url.hostname} {
   encode zstd gzip
   header {
-    Strict-Transport-Security "max-age=31536000; includeSubDomains"
-    X-Frame-Options "DENY"
-    X-Content-Type-Options "nosniff"
-    Referrer-Policy "no-referrer"
-    Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
-    Cross-Origin-Opener-Policy "same-origin"
-    Cross-Origin-Resource-Policy "same-origin"
-    Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'"
+    >Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    >X-Frame-Options "DENY"
+    >X-Content-Type-Options "nosniff"
+    >Referrer-Policy "no-referrer"
+    >Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+    >Cross-Origin-Opener-Policy "same-origin"
+    >Cross-Origin-Resource-Policy "same-origin"
+    >Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'"
   }
 
   handle / {
-    redir /console 302
+    redir * /console 302
   }
 
   handle /livez {

@@ -114,16 +114,19 @@ fi
 # Run the repository's production gate in the exact control image that is
 # about to be deployed, while passing the complete production dotenv rather
 # than only the subset forwarded by the Compose service definition.
-control_image="$("${compose[@]}" images -q control-api | head -n 1)"
+control_image_ref="$("${compose[@]}" config --images | grep -Fx 'mecordxn8n-control-api' | head -n 1)"
+[[ -n "$control_image_ref" ]] || fail "control image reference could not be resolved"
+control_image="$(docker image inspect "$control_image_ref" --format '{{.Id}}' 2>/dev/null || true)"
 [[ -n "$control_image" ]] || fail "control image was not built"
 docker run --rm \
   --network none \
   --read-only \
   --cap-drop ALL \
   --security-opt no-new-privileges \
-  --env-file .env \
+  --mount "type=bind,src=$release_dir/.env,dst=/run/mecordxn8n-production.env,readonly" \
   --entrypoint node \
   "$control_image" \
+  --env-file=/run/mecordxn8n-production.env \
   scripts/production-preflight.mjs
 
 if [[ "$ingress_mode" == "external" ]]; then

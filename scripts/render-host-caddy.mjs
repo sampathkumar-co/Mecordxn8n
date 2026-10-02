@@ -1,8 +1,11 @@
+import fs from "node:fs";
 import { pathToFileURL } from "node:url";
+import { parseEnv } from "node:util";
 
 export function renderHostCaddy({
   publicAppUrl,
   controlApiHostPort,
+  externalIngressUpstream,
 }) {
   let url;
   try {
@@ -32,6 +35,22 @@ export function renderHostCaddy({
     throw new Error("CONTROL_API_HOST_PORT must be an integer from 1024 to 65535");
   }
 
+  const candidate = String(externalIngressUpstream || "").trim();
+  let upstream = `127.0.0.1:${port}`;
+  if (candidate) {
+    const match = candidate.match(/^([a-z0-9][a-z0-9_.-]*):(\d{1,5})$/i);
+    if (!match) {
+      throw new Error(
+        "EXTERNAL_INGRESS_UPSTREAM must be a Docker DNS name and port",
+      );
+    }
+    const upstreamPort = Number(match[2]);
+    if (upstreamPort < 1 || upstreamPort > 65535) {
+      throw new Error("EXTERNAL_INGRESS_UPSTREAM port is invalid");
+    }
+    upstream = candidate;
+  }
+
   return `${url.hostname} {
   encode zstd gzip
   header {
@@ -50,23 +69,23 @@ export function renderHostCaddy({
   }
 
   handle /livez {
-    reverse_proxy 127.0.0.1:${port}
+    reverse_proxy ${upstream}
   }
 
   handle /console {
-    reverse_proxy 127.0.0.1:${port}
+    reverse_proxy ${upstream}
   }
 
   handle /console/* {
-    reverse_proxy 127.0.0.1:${port}
+    reverse_proxy ${upstream}
   }
 
   handle /v1/platform/* {
-    reverse_proxy 127.0.0.1:${port}
+    reverse_proxy ${upstream}
   }
 
   handle /v1/integrations/webhooks/* {
-    reverse_proxy 127.0.0.1:${port}
+    reverse_proxy ${upstream}
   }
 
   handle {
@@ -81,11 +100,23 @@ const invokedDirectly =
   import.meta.url === pathToFileURL(process.argv[1]).href;
 
 if (invokedDirectly) {
+  const protectedEnvPath = ".deploy/production.env";
+  const protectedEnv = fs.existsSync(protectedEnvPath)
+    ? parseEnv(fs.readFileSync(protectedEnvPath, "utf8"))
+    : {};
+
   process.stdout.write(
     renderHostCaddy({
-      publicAppUrl: process.env.PUBLIC_APP_URL || process.argv[2],
+      publicAppUrl:
+        process.env.PUBLIC_APP_URL || protectedEnv.PUBLIC_APP_URL || process.argv[2],
       controlApiHostPort:
-        process.env.CONTROL_API_HOST_PORT || process.argv[3],
+        process.env.CONTROL_API_HOST_PORT ||
+        protectedEnv.CONTROL_API_HOST_PORT ||
+        process.argv[3],
+      externalIngressUpstream:
+        process.env.EXTERNAL_INGRESS_UPSTREAM ||
+        protectedEnv.EXTERNAL_INGRESS_UPSTREAM ||
+        process.argv[4],
     }),
   );
 }

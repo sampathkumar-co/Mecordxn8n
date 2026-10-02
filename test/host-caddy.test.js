@@ -7,10 +7,11 @@ test("host Caddy snippet exposes only the approved public surface", () => {
   const rendered = renderHostCaddy({
     publicAppUrl: "https://mecord.example.test",
     controlApiHostPort: 18080,
+    externalIngressUpstream: "mecordxn8n-control-api:8080",
   });
 
   assert.match(rendered, /^mecord\.example\.test \{/);
-  assert.match(rendered, /reverse_proxy 127\.0\.0\.1:18080/);
+  assert.match(rendered, /reverse_proxy mecordxn8n-control-api:8080/);
   assert.match(rendered, /Content-Security-Policy/);
   assert.match(rendered, /handle \/v1\/platform\/\*/);
   assert.match(rendered, /handle \/v1\/integrations\/webhooks\/\*/);
@@ -20,7 +21,15 @@ test("host Caddy snippet exposes only the approved public surface", () => {
   assert.match(rendered, /handle \{\s+respond 404\s+\}/m);
 });
 
-test("host Caddy renderer rejects unsafe public URLs and ports", () => {
+test("host Caddy renderer retains loopback mode for a host reverse proxy", () => {
+  const rendered = renderHostCaddy({
+    publicAppUrl: "https://mecord.example.test",
+    controlApiHostPort: 18080,
+  });
+  assert.match(rendered, /reverse_proxy 127\.0\.0\.1:18080/);
+});
+
+test("host Caddy renderer rejects unsafe public URLs and upstreams", () => {
   assert.throws(
     () => renderHostCaddy({
       publicAppUrl: "http://mecord.example.test",
@@ -56,4 +65,18 @@ test("host Caddy renderer rejects unsafe public URLs and ports", () => {
     }),
     /1024 to 65535/,
   );
+  for (const externalIngressUpstream of [
+    "127.0.0.1:8080/path",
+    "https://mecordxn8n-control-api:8080",
+    "name:70000",
+  ]) {
+    assert.throws(
+      () => renderHostCaddy({
+        publicAppUrl: "https://mecord.example.test",
+        controlApiHostPort: 18080,
+        externalIngressUpstream,
+      }),
+      /EXTERNAL_INGRESS_UPSTREAM/,
+    );
+  }
 });

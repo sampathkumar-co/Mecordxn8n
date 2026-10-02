@@ -99,16 +99,16 @@ services:
     ports:
       - "127.0.0.1:${CONTROL_API_HOST_PORT:-8080}:8080"
     networks:
-      - edge
-      - app-db
-      - orchestrator-net
-      - http-observer-net
-      - browser-qa-net
-      - site-discovery-net
-      - journey-qa-net
-      - verification-net
-      - remediation-net
-      - integration-net
+      edge: {}
+      app-db: {}
+      orchestrator-net: {}
+      http-observer-net: {}
+      browser-qa-net: {}
+      site-discovery-net: {}
+      journey-qa-net: {}
+      verification-net: {}
+      remediation-net: {}
+      integration-net: {}
 
   http-observer:
     <<: *node-hardening

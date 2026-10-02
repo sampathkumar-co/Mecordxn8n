@@ -50,6 +50,31 @@ const ingressMode = String(process.env.INGRESS_MODE || "").trim().toLowerCase();
 if (!["external", "standalone"].includes(ingressMode)) {
   errors.push("INGRESS_MODE must be external or standalone");
 }
+const externalIngressNetwork = String(
+  process.env.EXTERNAL_INGRESS_NETWORK || "",
+).trim();
+const externalIngressUpstream = String(
+  process.env.EXTERNAL_INGRESS_UPSTREAM || "",
+).trim();
+if (Boolean(externalIngressNetwork) !== Boolean(externalIngressUpstream)) {
+  errors.push(
+    "EXTERNAL_INGRESS_NETWORK and EXTERNAL_INGRESS_UPSTREAM must be configured together",
+  );
+}
+if (
+  externalIngressNetwork &&
+  !/^[a-z0-9][a-z0-9_.-]*$/i.test(externalIngressNetwork)
+) {
+  errors.push("EXTERNAL_INGRESS_NETWORK is invalid");
+}
+if (
+  externalIngressNetwork &&
+  externalIngressUpstream !== "mecordxn8n-control-api:8080"
+) {
+  errors.push(
+    "containerized external ingress must use mecordxn8n-control-api:8080",
+  );
+}
 const controlApiHostPort = Number(process.env.CONTROL_API_HOST_PORT);
 const n8nHostPort = Number(process.env.N8N_HOST_PORT);
 for (const [name, value] of [

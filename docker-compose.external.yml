@@ -1,0 +1,11 @@
+services:
+  control-api:
+    networks:
+      external-ingress:
+        aliases:
+          - mecordxn8n-control-api
+
+networks:
+  external-ingress:
+    external: true
+    name: ${EXTERNAL_INGRESS_NETWORK:?EXTERNAL_INGRESS_NETWORK is required}

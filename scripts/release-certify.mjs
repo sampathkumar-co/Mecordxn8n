@@ -163,6 +163,13 @@ const checks = {
     composeText.includes("WORKER_TOKEN_BROWSER_QA") &&
     composeText.includes("WORKER_TOKEN_REMEDIATION") &&
     composeText.includes("WORKER_TOKEN_INTEGRATION"),
+  mecordServiceAuthentication:
+    composeText.includes("MECORD_OAUTH_CLIENT_ID") &&
+    composeText.includes("MECORD_OAUTH_CLIENT_SECRET") &&
+    fs.readFileSync("src/mcp/mecord-client.js", "utf8")
+      .includes("client_credentials") &&
+    fs.readFileSync("scripts/production-preflight.mjs", "utf8")
+      .includes("MECORD_OAUTH_CLIENT_SECRET"),
   immutableEvidenceReferences:
     fs.readFileSync("src/milestone-a/repository.js", "utf8")
       .includes("evidence://sha256/"),

@@ -12,7 +12,9 @@ test("host Caddy snippet exposes only the approved public surface", () => {
 
   assert.match(rendered, /^mecord\.example\.test \{/);
   assert.match(rendered, /reverse_proxy mecordxn8n-control-api:8080/);
-  assert.match(rendered, /Content-Security-Policy/);
+  assert.match(rendered, />Content-Security-Policy/);
+  assert.match(rendered, />X-Content-Type-Options "nosniff"/);
+  assert.match(rendered, /handle \/ \{\s+redir \* \/console 302\s+\}/m);
   assert.match(rendered, /handle \/v1\/platform\/\*/);
   assert.match(rendered, /handle \/v1\/integrations\/webhooks\/\*/);
   assert.equal(rendered.includes("/metrics"), false);

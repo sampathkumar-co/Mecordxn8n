@@ -97,7 +97,10 @@ In this mode:
   and is not started;
 - the Control API is published only to
   `127.0.0.1:$CONTROL_API_HOST_PORT`;
-- n8n is published only to `127.0.0.1:$N8N_HOST_PORT`;
+- n8n is published only to `127.0.0.1:$N8N_HOST_PORT`; n8n joins
+  the project-local non-internal `edge` network so current Docker Engine can
+  materialize that loopback port while its database and orchestration networks
+  remain internal. This is not the shared external-ingress network;
 - the remote deploy script verifies the Control API's published address is
   loopback-only;
 - when the shared proxy itself runs in Docker, set

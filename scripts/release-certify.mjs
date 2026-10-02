@@ -159,6 +159,17 @@ const checks = {
     composeText.includes("evidence_store:/evidence") &&
     !composeText.includes("browser_artifacts:/artifacts") &&
     !composeText.includes("verification_artifacts:/artifacts"),
+  productionN8nLoopback: (() => {
+    const baseCompose = fs.readFileSync("docker-compose.yml", "utf8");
+    const n8nSection =
+      baseCompose.split("\n  n8n:\n")[1]?.split("\nvolumes:\n")[0] || "";
+    return (
+      n8nSection.includes("127.0.0.1:${N8N_HOST_PORT:-5678}:5678") &&
+      n8nSection.includes("- edge") &&
+      n8nSection.includes("- n8n-db") &&
+      n8nSection.includes("- orchestrator-net")
+    );
+  })(),
   productionScopedWorkers:
     composeText.includes("WORKER_TOKEN_BROWSER_QA") &&
     composeText.includes("WORKER_TOKEN_REMEDIATION") &&

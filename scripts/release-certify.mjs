@@ -217,6 +217,10 @@ const checks = {
       remote.includes("127.0.0.1:") &&
       remote.includes("production-preflight.mjs") &&
       remote.includes("docker compose") &&
+      remote.includes("config --images") &&
+      remote.includes("docker image inspect") &&
+      remote.includes("/run/mecordxn8n-production.env") &&
+      remote.includes("--env-file=/run/mecordxn8n-production.env") &&
       remote.includes("healthz")
     );
   })(),

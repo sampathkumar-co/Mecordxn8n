@@ -313,6 +313,10 @@ services:
     volumes:
       - n8n_data:/home/node/.n8n
     networks:
+      # A non-internal project network is required for Docker to materialize
+      # the loopback-only host port mapping on current Docker Engine. This is
+      # not the shared external-ingress network.
+      - edge
       - n8n-db
       - orchestrator-net
 

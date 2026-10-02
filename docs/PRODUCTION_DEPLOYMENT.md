@@ -159,12 +159,15 @@ The workflow performs the following sequence:
 11. Builds with the digest-pinned production base/runtime images.
 12. Runs `production-preflight.mjs` inside the exact control image that will
     be deployed.
-13. Starts the production Compose project with a fixed project name
+13. Starts only the application and n8n PostgreSQL services and waits for both
+    database healthchecks.
+14. Runs `scripts/migrate.mjs` from the exact newly built Control API image.
+15. Starts the production Compose project with a fixed project name
     (`mecordxn8n`).
-14. Waits for database-backed internal `/healthz` readiness.
-15. Updates the `current` release symlink only after internal readiness.
-16. Runs the strict authenticated external HTTPS smoke from the GitHub runner.
-17. Removes temporary runner-side SSH/environment material.
+16. Waits for database-backed internal `/healthz` readiness.
+17. Updates the `current` release symlink only after internal readiness.
+18. Runs the strict authenticated external HTTPS smoke from the GitHub runner.
+19. Removes temporary runner-side SSH/environment material.
 
 The remote script preserves a `previous` symlink when a prior `current`
 release exists.

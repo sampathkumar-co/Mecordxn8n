@@ -129,6 +129,12 @@ docker run --rm \
   --env-file=/run/mecordxn8n-production.env \
   scripts/production-preflight.mjs
 
+# Bring up only the stateful databases first and wait for their healthchecks.
+# Run migrations from the exact newly built control image before any application
+# or worker service is promoted to the new release.
+"${compose[@]}" up -d --wait postgres n8n-postgres
+"${compose[@]}" run --rm --no-deps control-api node scripts/migrate.mjs
+
 if [[ "$ingress_mode" == "external" ]]; then
   standalone_compose=(
     docker compose

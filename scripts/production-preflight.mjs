@@ -29,7 +29,6 @@ const required = [
   "PLATFORM_MASTER_KEY",
   "PLATFORM_AUTH_KEY",
   "AUTH_MAIL_WEBHOOK_SECRET",
-  "MECORD_MCP_TOKEN",
   "BOOTSTRAP_TOKEN",
   "APP_DOMAIN",
   "ACME_EMAIL",
@@ -37,7 +36,6 @@ const required = [
   "AUTH_MAIL_WEBHOOK_URL",
   "AUTH_MAIL_WEBHOOK_SECRET",
   "MECORD_MCP_URL",
-  "MECORD_MCP_TOKEN",
   "MECORD_HEALTH_URL",
   "N8N_HEALTH_URL",
 ];
@@ -98,6 +96,50 @@ for (const name of required) {
   if (!value) errors.push(name + " is required");
   if (/replace-with|changeme|example-secret|password123/i.test(value)) {
     errors.push(name + " still contains a placeholder");
+  }
+}
+
+const mcpStaticToken = String(process.env.MECORD_MCP_TOKEN || "").trim();
+const mcpOAuth = {
+  tokenUrl: String(process.env.MECORD_OAUTH_TOKEN_URL || "").trim(),
+  clientId: String(process.env.MECORD_OAUTH_CLIENT_ID || "").trim(),
+  clientSecret: String(process.env.MECORD_OAUTH_CLIENT_SECRET || "").trim(),
+  audience: String(process.env.MECORD_OAUTH_AUDIENCE || "").trim(),
+  scope: String(process.env.MECORD_OAUTH_SCOPE || "").trim(),
+};
+const mcpOAuthConfigured = [
+  mcpOAuth.tokenUrl,
+  mcpOAuth.clientId,
+  mcpOAuth.clientSecret,
+  mcpOAuth.audience,
+].some(Boolean);
+if (!mcpStaticToken && !mcpOAuthConfigured) {
+  errors.push("Mecord authentication requires MECORD_MCP_TOKEN or OAuth client credentials");
+}
+if (mcpStaticToken && mcpStaticToken.length < 32) {
+  errors.push("MECORD_MCP_TOKEN must be at least 32 characters");
+}
+if (mcpOAuthConfigured) {
+  for (const [name, value] of Object.entries(mcpOAuth)) {
+    if (!value) errors.push("MECORD OAuth " + name + " is required");
+    if (/replace-with|changeme|example-secret|password123/i.test(value)) {
+      errors.push("MECORD OAuth " + name + " still contains a placeholder");
+    }
+  }
+  let tokenUrl;
+  try { tokenUrl = new URL(mcpOAuth.tokenUrl); } catch {}
+  if (!tokenUrl || tokenUrl.protocol !== "https:") {
+    errors.push("MECORD_OAUTH_TOKEN_URL must be an HTTPS URL");
+  }
+  if (mcpOAuth.clientSecret && mcpOAuth.clientSecret.length < 32) {
+    errors.push("MECORD_OAUTH_CLIENT_SECRET must be at least 32 characters");
+  }
+  if (mcpOAuth.audience && mcpOAuth.audience !== values.MECORD_MCP_URL) {
+    errors.push("MECORD_OAUTH_AUDIENCE must equal MECORD_MCP_URL");
+  }
+  const scopes = new Set(mcpOAuth.scope.split(/\s+/).filter(Boolean));
+  for (const scope of ["operator:read", "operator:write"]) {
+    if (!scopes.has(scope)) errors.push("MECORD_OAUTH_SCOPE must include " + scope);
   }
 }
 

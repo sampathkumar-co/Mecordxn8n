@@ -65,6 +65,9 @@ The preflight requires, among other controls:
 - privileged MFA and verified-email enforcement;
 - signed authentication-mail delivery configuration;
 - n8n and Mecord dependency-health configuration;
+- Mecord remediation authentication, preferably the dedicated OAuth
+  client-credentials identity (`MECORD_OAUTH_*`). A static
+  `MECORD_MCP_TOKEN` remains supported for controlled compatibility cases;
 - strong platform, backup, n8n and bootstrap keys;
 - digest-qualified Node, Playwright, PostgreSQL, n8n and Caddy image refs.
 

@@ -67,6 +67,13 @@ export async function runRemediationOnce({
       new MecordMcpClient({
         endpoint: process.env.MECORD_MCP_URL,
         token: process.env.MECORD_MCP_TOKEN,
+        oauth: {
+          tokenUrl: process.env.MECORD_OAUTH_TOKEN_URL,
+          clientId: process.env.MECORD_OAUTH_CLIENT_ID,
+          clientSecret: process.env.MECORD_OAUTH_CLIENT_SECRET,
+          audience: process.env.MECORD_OAUTH_AUDIENCE,
+          scope: process.env.MECORD_OAUTH_SCOPE,
+        },
       });
 
     abortController = new AbortController();

@@ -1,21 +1,124 @@
 import { randomUUID } from "node:crypto";
 
+function normalizeOAuth(oauth = {}) {
+  const values = {
+    tokenUrl: String(oauth.tokenUrl || "").trim(),
+    clientId: String(oauth.clientId || "").trim(),
+    clientSecret: String(oauth.clientSecret || "").trim(),
+    audience: String(oauth.audience || "").trim(),
+    scope: String(oauth.scope || "").trim(),
+  };
+  const credentialFields = [
+    values.tokenUrl,
+    values.clientId,
+    values.clientSecret,
+    values.audience,
+  ];
+  if (!credentialFields.some(Boolean)) return null;
+  for (const [name, value] of Object.entries(values)) {
+    if (!value) {
+      throw new Error(`MECORD OAuth ${name} is required`);
+    }
+  }
+
+  let tokenUrl;
+  try {
+    tokenUrl = new URL(values.tokenUrl);
+  } catch {
+    throw new Error("MECORD_OAUTH_TOKEN_URL must be a valid URL");
+  }
+  if (tokenUrl.protocol !== "https:") {
+    throw new Error("MECORD_OAUTH_TOKEN_URL must use HTTPS");
+  }
+  return { ...values, tokenUrl: tokenUrl.toString() };
+}
+
 export class MecordMcpClient {
-  constructor({ endpoint, token, fetchImpl = fetch }) {
+  constructor({
+    endpoint,
+    token,
+    oauth,
+    fetchImpl = fetch,
+    now = () => Date.now(),
+  }) {
     if (!endpoint) throw new Error("MECORD_MCP_URL is required");
     this.endpoint = endpoint;
-    this.token = token || null;
+    this.oauth = normalizeOAuth(oauth);
+    this.token = this.oauth ? null : String(token || "").trim() || null;
     this.fetchImpl = fetchImpl;
+    this.now = now;
+    this.oauthAccessToken = null;
+    this.oauthExpiresAt = 0;
     this.sessionId = null;
     this.nextId = 1;
   }
 
-  async #post(payload, { signal } = {}) {
+  async #authorization({ signal } = {}) {
+    if (this.token) return `Bearer ${this.token}`;
+    if (!this.oauth) return null;
+
+    if (
+      this.oauthAccessToken &&
+      this.oauthExpiresAt > this.now() + 30_000
+    ) {
+      return `Bearer ${this.oauthAccessToken}`;
+    }
+
+    const form = new URLSearchParams({
+      grant_type: "client_credentials",
+      scope: this.oauth.scope,
+      audience: this.oauth.audience,
+    });
+    const formEncode = (value) => {
+      const encoded = new URLSearchParams({ value }).toString();
+      return encoded.slice("value=".length);
+    };
+    const basic = Buffer.from(
+      formEncode(this.oauth.clientId) +
+        ":" +
+        formEncode(this.oauth.clientSecret),
+      "utf8",
+    ).toString("base64");
+    const response = await this.fetchImpl(this.oauth.tokenUrl, {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        authorization: `Basic ${basic}`,
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: form.toString(),
+      signal,
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      throw new Error(`Mecord OAuth token endpoint returned HTTP ${response.status}`);
+    }
+
+    let payload;
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      throw new Error("Mecord OAuth token endpoint returned invalid JSON");
+    }
+    const accessToken = String(payload.access_token || "").trim();
+    const expiresIn = Number(payload.expires_in || 300);
+    if (!accessToken) {
+      throw new Error("Mecord OAuth token endpoint did not return an access token");
+    }
+    this.oauthAccessToken = accessToken;
+    this.oauthExpiresAt =
+      this.now() +
+      (Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn : 300) * 1000;
+    return `Bearer ${accessToken}`;
+  }
+
+  async #post(payload, { signal, retryAuth = true } = {}) {
     const headers = {
       "content-type": "application/json",
       accept: "application/json, text/event-stream",
     };
-    if (this.token) headers.authorization = `Bearer ${this.token}`;
+    const authorization = await this.#authorization({ signal });
+    if (authorization) headers.authorization = authorization;
     if (this.sessionId) headers["mcp-session-id"] = this.sessionId;
 
     const response = await this.fetchImpl(this.endpoint, {
@@ -25,6 +128,16 @@ export class MecordMcpClient {
       signal,
     });
 
+    if (
+      response.status === 401 &&
+      retryAuth &&
+      this.oauth &&
+      !this.token
+    ) {
+      this.oauthAccessToken = null;
+      this.oauthExpiresAt = 0;
+      return this.#post(payload, { signal, retryAuth: false });
+    }
     if (!response.ok) {
       throw new Error(`Mecord MCP returned HTTP ${response.status}`);
     }

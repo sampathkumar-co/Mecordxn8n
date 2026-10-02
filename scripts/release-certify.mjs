@@ -62,6 +62,7 @@ const requiredFiles = [
   "src/milestone-h/billing.js",
   "src/milestone-h/domain.js",
   "docker-compose.production.yml",
+  "docker-compose.external.yml",
   "deploy/Caddyfile",
   "scripts/production-preflight.mjs",
   "scripts/production-smoke.mjs",
@@ -87,9 +88,14 @@ const sequenceValid = expectedPrefix.every(
   (value, index) => Number(value) === index + 1,
 );
 
+const externalComposeText = fs.readFileSync(
+  "docker-compose.external.yml",
+  "utf8",
+);
 const composeText = [
   fs.readFileSync("docker-compose.yml", "utf8"),
   fs.readFileSync("docker-compose.production.yml", "utf8"),
+  externalComposeText,
 ].join("\n");
 const mutableImageTags = [
   ...composeText.matchAll(
@@ -170,8 +176,12 @@ const checks = {
     composeText.includes("N8N_HOST_PORT") &&
     fs.readFileSync("docker-compose.production.yml", "utf8")
       .includes("standalone-ingress") &&
+    externalComposeText.includes("EXTERNAL_INGRESS_NETWORK") &&
+    externalComposeText.includes("mecordxn8n-control-api") &&
     fs.readFileSync("scripts/render-host-caddy.mjs", "utf8")
-      .includes("reverse_proxy 127.0.0.1:"),
+      .includes("EXTERNAL_INGRESS_UPSTREAM") &&
+    fs.readFileSync("scripts/render-host-caddy.mjs", "utf8")
+      .includes("reverse_proxy ${upstream}"),
   productionDeploymentGate: (() => {
     const workflow = fs.readFileSync(
       ".github/workflows/deploy-production.yml",
@@ -195,6 +205,8 @@ const checks = {
       remote.includes("sha256sum") &&
       remote.includes("--env-file .env") &&
       remote.includes("standalone-ingress") &&
+      remote.includes("docker-compose.external.yml") &&
+      remote.includes("external_ingress_network") &&
       remote.includes("127.0.0.1:") &&
       remote.includes("production-preflight.mjs") &&
       remote.includes("docker compose") &&

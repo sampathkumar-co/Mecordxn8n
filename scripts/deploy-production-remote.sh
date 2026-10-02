@@ -75,13 +75,35 @@ cd "$release_dir"
 command -v docker >/dev/null 2>&1 || fail "docker is not installed"
 docker compose version >/dev/null 2>&1 || fail "docker compose is unavailable"
 
-compose=(
+compose_base=(
   docker compose
   --env-file .env
   -p mecordxn8n
   -f docker-compose.yml
   -f docker-compose.production.yml
 )
+
+compose_env_value() {
+  local key="$1"
+  "${compose_base[@]}" config --environment |
+    awk -F= -v key="$key" '$1 == key { print substr($0, length(key) + 2); exit }'
+}
+
+external_ingress_network="$(compose_env_value EXTERNAL_INGRESS_NETWORK)"
+external_ingress_upstream="$(compose_env_value EXTERNAL_INGRESS_UPSTREAM)"
+if [[ -n "$external_ingress_network" || -n "$external_ingress_upstream" ]]; then
+  [[ -n "$external_ingress_network" && -n "$external_ingress_upstream" ]] ||
+    fail "external ingress network and upstream must be configured together"
+fi
+
+compose=("${compose_base[@]}")
+if [[ "$ingress_mode" == "external" && -n "$external_ingress_network" ]]; then
+  [[ -f docker-compose.external.yml ]] ||
+    fail "containerized external ingress compose file is missing"
+  docker network inspect "$external_ingress_network" >/dev/null 2>&1 ||
+    fail "external ingress Docker network does not exist"
+  compose+=(-f docker-compose.external.yml)
+fi
 if [[ "$ingress_mode" == "standalone" ]]; then
   compose+=(--profile standalone-ingress)
 fi
@@ -123,6 +145,17 @@ if [[ "$ingress_mode" == "external" ]]; then
   published="$("${compose[@]}" port control-api 8080 | head -n 1)"
   [[ "$published" == 127.0.0.1:* || "$published" == "[::1]:"* ]] ||
     fail "external ingress requires loopback-only control-api publication"
+
+  if [[ -n "$external_ingress_network" ]]; then
+    control_container="$("${compose[@]}" ps -q control-api)"
+    [[ -n "$control_container" ]] || fail "control-api container is missing"
+    docker inspect "$control_container" --format       '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' |
+      grep -Fx "$external_ingress_network" >/dev/null ||
+      fail "control-api is not attached to the external ingress network"
+    docker inspect "$control_container" --format       '{{range .NetworkSettings.Networks}}{{range .Aliases}}{{println .}}{{end}}{{end}}' |
+      grep -Fx 'mecordxn8n-control-api' >/dev/null ||
+      fail "control-api external ingress alias is missing"
+  fi
 fi
 
 ready=0

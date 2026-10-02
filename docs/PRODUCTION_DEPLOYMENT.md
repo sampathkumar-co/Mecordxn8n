@@ -82,11 +82,11 @@ needed.
 
 ## Ingress modes
 
-### External host Caddy
+### External Caddy or reverse proxy
 
 Use `DEPLOY_INGRESS_MODE=external` when the server already owns ports 80/443
-with a host-level Caddy or another reverse proxy. This is the required mode on
-a shared VPS such as the currently discovered host.
+with an existing Caddy or another reverse proxy. The proxy may run on the host
+or in Docker. Mecordxn8n remains a separate Compose project in either case.
 
 In this mode:
 
@@ -97,6 +97,12 @@ In this mode:
 - n8n is published only to `127.0.0.1:$N8N_HOST_PORT`;
 - the remote deploy script verifies the Control API's published address is
   loopback-only;
+- when the shared proxy itself runs in Docker, set
+  `EXTERNAL_INGRESS_NETWORK` and `EXTERNAL_INGRESS_UPSTREAM` in the protected
+  production dotenv. Only `control-api` joins that pre-existing edge network;
+  databases, n8n, workers, evidence and volumes remain isolated;
+- the containerized mode uses the fixed upstream
+  `mecordxn8n-control-api:8080`; host-proxy mode keeps the loopback upstream;
 - `scripts/render-host-caddy.mjs` generates a release-specific Caddy snippet
   with the exact public route allowlist and security headers;
 - that generated snippet is copied into the immutable release directory as

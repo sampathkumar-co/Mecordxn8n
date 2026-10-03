@@ -6,3 +6,6 @@ artifacts/
 playwright-report/
 test-results/
 *.log
+.deploy/
+.deploy-final/
+.deploy-local/

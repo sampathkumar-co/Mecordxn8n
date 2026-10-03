@@ -136,6 +136,9 @@ await Promise.all([
 ]);
 await mobilePage.locator("#app-view:not(.hidden)").waitFor({ timeout: 10_000 });
 markMobileAuthenticated();
+if (await mobilePage.locator("#toast.show").filter({ hasText: "Your session has expired." }).count()) {
+  failures.push("mobile: fresh login retained a spurious session-expired toast");
+}
 await assertNoHorizontalOverflow(mobilePage, "mobile-home");
 await mobilePage.locator("#mobile-menu").click();
 await mobilePage.locator("#sidebar.mobile-open").waitFor();

@@ -1,5 +1,6 @@
 import http from "node:http";
 import { timingSafeEqual } from "node:crypto";
+import { pathToFileURL } from "node:url";
 
 import {
   AUTHORIZATION_MODES,
@@ -674,7 +675,8 @@ export function createServer({
   return server;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+const invokedUrl = process.argv[1] ? pathToFileURL(process.argv[1]).href : null;
+if (invokedUrl && import.meta.url === invokedUrl) {
   const port = Number(process.env.PORT || 8080);
   const server = createServer();
   server.listen(port, () => {

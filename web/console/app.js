@@ -209,7 +209,11 @@ async function boot() {
       await renderRoute(route);
     }
   } catch (error) {
-    if(error?.status===401) clearBrowserSession();
+    if(error?.status===401){
+      clearBrowserSession();
+      showAuth();
+      return;
+    }
     toast(error.message,true);
     showAuth();
   }

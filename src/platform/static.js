@@ -47,7 +47,8 @@ function resolveConsoleFile(pathname) {
   if (
     !relative ||
     relative.includes("\0") ||
-    relative.split("/").some((part) => part === ".." || part === ".")
+    relative.includes("\\") ||
+    relative.split("/").some((part) => part.startsWith("."))
   ) {
     return null;
   }

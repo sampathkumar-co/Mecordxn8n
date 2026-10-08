@@ -172,11 +172,11 @@ test("mobile data tables preserve every column as labeled card rows", () => {
   );
   assert.match(
     css,
-    /@media\(max-width:620px\)[\s\S]*?\.table td::before\{content:attr\(data-label\)/,
+    /@media\(max-width:620px\)[\s\S]*?\.mobile-card-table td::before\{content:attr\(data-label\)/,
   );
   assert.match(
     css,
-    /@media\(max-width:620px\)[\s\S]*?\.table tr\{display:grid/,
+    /@media\(max-width:620px\)[\s\S]*?\.mobile-card-table tr\{display:grid/,
   );
 });
 
@@ -219,4 +219,18 @@ test("mutating modal forms use the shared async rejection boundary", () => {
     }
   }
   visit(root);
+});
+
+test("mobile card conversion leaves handwritten table headers visible", () => {
+  const ui = fs.readFileSync(path.resolve("web/console/components/ui.js"), "utf8");
+  const css = fs.readFileSync(path.resolve("web/console/styles/components.css"), "utf8");
+  const mobile = css.split("\n").find((line) => line.startsWith("@media(max-width:620px)"));
+  assert.ok(mobile, "expected mobile table styling");
+  assert.match(ui, /class="table-wrap mobile-card-wrap"/);
+  assert.match(ui, /class="table mobile-card-table"/);
+  assert.match(mobile, /\.mobile-card-wrap\{overflow:visible\}/);
+  assert.match(mobile, /\.mobile-card-table thead\{position:absolute/);
+  assert.doesNotMatch(mobile, /\.table-wrap\{overflow:visible\}/);
+  assert.doesNotMatch(mobile, /(?<![-\w])\.table thead\{position:absolute/);
+  assert.doesNotMatch(mobile, /(?<![-\w])\.table td::before\{/);
 });

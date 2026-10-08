@@ -215,6 +215,38 @@ await Promise.all([
 ]);
 await mobilePage.locator("#app-view:not(.hidden)").waitFor({ timeout: 10_000 });
 markMobileAuthenticated();
+// Only labeled, generated tables may become mobile cards. Handwritten tables
+// must keep their column headers and native table layout.
+const mobileTableStyles = await mobilePage.evaluate(() => {
+  const probe = document.createElement("section");
+  probe.innerHTML = `
+    <div class="table-wrap"><table class="table raw-table">
+      <thead><tr><th>Value</th></tr></thead><tbody><tr><td>Raw value</td></tr></tbody>
+    </table></div>
+    <div class="table-wrap mobile-card-wrap"><table class="table mobile-card-table">
+      <thead><tr><th>Value</th></tr></thead><tbody><tr><td data-label="Value">Card value</td></tr></tbody>
+    </table></div>`;
+  document.body.appendChild(probe);
+  const raw = probe.querySelector(".raw-table");
+  const card = probe.querySelector(".mobile-card-table");
+  const values = {
+    rawHeaderPosition: getComputedStyle(raw.querySelector("thead")).position,
+    cardHeaderPosition: getComputedStyle(card.querySelector("thead")).position,
+    rawRowDisplay: getComputedStyle(raw.querySelector("tbody tr")).display,
+    cardRowDisplay: getComputedStyle(card.querySelector("tbody tr")).display,
+    cardLabel: getComputedStyle(card.querySelector("td"), "::before").content,
+  };
+  probe.remove();
+  return values;
+});
+if (mobileTableStyles.rawHeaderPosition === "absolute" ||
+    mobileTableStyles.cardHeaderPosition !== "absolute" ||
+    mobileTableStyles.rawRowDisplay !== "table-row" ||
+    mobileTableStyles.cardRowDisplay !== "grid" ||
+    !mobileTableStyles.cardLabel.includes("Value")) {
+  failures.push("mobile table styles broke raw headers or labeled cards: " +
+    JSON.stringify(mobileTableStyles));
+}
 if (await mobilePage.locator("#toast.show").filter({ hasText: "Your session has expired." }).count()) {
   failures.push("mobile: fresh login retained a spurious session-expired toast");
 }

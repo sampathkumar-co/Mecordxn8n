@@ -127,13 +127,20 @@ async function readJson(req) {
 
   if (chunks.length === 0) return {};
 
+  let parsed;
   try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    parsed = JSON.parse(Buffer.concat(chunks).toString("utf8"));
   } catch {
     const error = new Error("invalid JSON body");
     error.statusCode = 400;
     throw error;
   }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    const error = new Error("JSON request body must be an object");
+    error.statusCode = 400;
+    throw error;
+  }
+  return parsed;
 }
 
 function normalizeTargetInput(body) {

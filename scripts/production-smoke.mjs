@@ -1,3 +1,5 @@
+import { verifyPublicAssets } from "./verify-public-assets.mjs";
+
 const base = String(process.env.PUBLIC_APP_URL || process.argv[2] || "")
   .trim()
   .replace(/\/+$/, "");
@@ -146,6 +148,17 @@ if (strict) {
       },
     },
   ));
+}
+
+if (strict) {
+  const audit = await verifyPublicAssets(base);
+  if (!audit.ok) {
+    throw new Error(
+      "Strict deployment smoke: public console assets do not match checked-out release " +
+      JSON.stringify(audit.failures.slice(0, 8)),
+    );
+  }
+  results.push({ path: "/console/*", method: "GET", status: 200, assetsVerified: audit.checked });
 }
 
 console.log(JSON.stringify({ ok: true, base, strict, results }));

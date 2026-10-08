@@ -199,6 +199,11 @@ In GitHub:
 3. Run it from `main`.
 4. Require a completely green workflow, including **Strict authenticated HTTPS
    smoke**, before treating the release as live.
+5. The strict smoke also compares the public Control Center HTML, JavaScript
+   and CSS assets against the checked-out release. If public assets are stale, the
+   rollout must fail even when health checks pass. Independently verify with:
+   `node scripts/verify-public-assets.mjs https://your-production-domain`.
+   The checker is read-only and does not require customer credentials.
 
 A repository release candidate is not the same thing as a deployed production
 release. Live status is established only by the successful protected deployment

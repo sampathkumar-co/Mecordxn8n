@@ -66,6 +66,8 @@ const requiredFiles = [
   "deploy/Caddyfile",
   "scripts/production-preflight.mjs",
   "scripts/production-smoke.mjs",
+  "scripts/verify-public-assets.mjs",
+  "test/verify-public-assets.test.js",
   "docs/UI_UX_V2_PLAN.md",
 ];
 
@@ -160,7 +162,7 @@ const checks = {
     !composeText.includes("browser_artifacts:/artifacts") &&
     !composeText.includes("verification_artifacts:/artifacts"),
   productionN8nLoopback: (() => {
-    const baseCompose = fs.readFileSync("docker-compose.yml", "utf8");
+    const baseCompose = fs.readFileSync("docker-compose.yml", "utf8").replace(/\r\n/g, "\n");
     const n8nSection =
       baseCompose.split("\n  n8n:\n")[1]?.split("\nvolumes:\n")[0] || "";
     return (
@@ -200,6 +202,8 @@ const checks = {
       .includes("EXTERNAL_INGRESS_UPSTREAM") &&
     fs.readFileSync("scripts/render-host-caddy.mjs", "utf8")
       .includes("reverse_proxy ${upstream}"),
+  strictPublicAssetParity: fs.readFileSync("scripts/production-smoke.mjs", "utf8")
+    .includes("verifyPublicAssets(base)"),
   productionDeploymentGate: (() => {
     const workflow = fs.readFileSync(
       ".github/workflows/deploy-production.yml",

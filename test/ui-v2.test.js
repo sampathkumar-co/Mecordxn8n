@@ -127,3 +127,96 @@ test("Control Center V2 remains CSP-compatible without inline style attributes o
   assert.match(html, /<dialog id="modal" class="modal">\s*<div class="modal-shell">/);
   assert.match(html, /data-close-dialog="modal"/);
 });
+
+
+test("browser favicon requests do not fall through to authenticated routes", async () => {
+  for (const method of ["GET", "HEAD"]) {
+    const response = await fetch(baseUrl + "/favicon.ico", { method });
+    assert.equal(response.status, 204, method);
+    assert.match(response.headers.get("cache-control") || "", /max-age=86400/);
+  }
+});
+
+test("mobile Control Center header wraps actions instead of clipping them", () => {
+  const css = fs.readFileSync(
+    path.resolve("web/console/styles/layout.css"),
+    "utf8",
+  );
+  assert.match(
+    css,
+    /@media\(max-width:760px\)[\s\S]*?\.context-bar\{[^}]*flex-wrap:wrap/,
+  );
+  assert.match(
+    css,
+    /\.context-actions\{[^}]*width:100%;justify-content:flex-end/,
+  );
+  assert.match(
+    css,
+    /\.context-left\{[^}]*flex:1 0 100%;width:100%/,
+  );
+});
+
+
+test("mobile data tables preserve every column as labeled card rows", () => {
+  const uiSource = fs.readFileSync(
+    path.resolve("web/console/components/ui.js"),
+    "utf8",
+  );
+  const css = fs.readFileSync(
+    path.resolve("web/console/styles/components.css"),
+    "utf8",
+  );
+  assert.match(
+    uiSource,
+    /<td data-label="\$\{escapeHtml\(headers\[index\] \|\| ""\)\}">/,
+  );
+  assert.match(
+    css,
+    /@media\(max-width:620px\)[\s\S]*?\.table td::before\{content:attr\(data-label\)/,
+  );
+  assert.match(
+    css,
+    /@media\(max-width:620px\)[\s\S]*?\.table tr\{display:grid/,
+  );
+});
+
+test("DOM collection operations use the multi-element query helper", () => {
+  const root = path.resolve("web/console");
+  const files = [];
+  function visit(directory) {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const full = path.join(directory, entry.name);
+      if (entry.isDirectory()) visit(full);
+      else if (entry.name.endsWith(".js")) files.push(full);
+    }
+  }
+  visit(root);
+  const invalidCollectionCall = /(?<!\$)\$\(\s*["'`][^"'\n]+["'`]\s*\)\.(?:forEach|map|filter|reduce|some|every)\s*\(/g;
+  for (const file of files) {
+    const source = fs.readFileSync(file, "utf8");
+    assert.equal(
+      invalidCollectionCall.test(source), false,
+      `${path.relative(root, file)} uses a single-element selector as a collection`,
+    );
+    invalidCollectionCall.lastIndex = 0;
+  }
+});
+
+test("mutating modal forms use the shared async rejection boundary", () => {
+  const root = path.resolve("web/console");
+  function visit(directory) {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const full = path.join(directory, entry.name);
+      if (entry.isDirectory()) visit(full);
+      else if (entry.name === "actions.js" || entry.name === "workspace.js") {
+        const source = fs.readFileSync(full, "utf8");
+        assert.equal(
+          /\.addEventListener\(\s*["']submit["']\s*,\s*async\s*\(/.test(source),
+          false,
+          `${path.relative(root, full)} has a potentially unhandled form rejection`,
+        );
+      }
+    }
+  }
+  visit(root);
+});

@@ -1,5 +1,6 @@
 import http from "node:http";
 import { timingSafeEqual } from "node:crypto";
+import { pathToFileURL } from "node:url";
 
 import {
   AUTHORIZATION_MODES,
@@ -348,6 +349,17 @@ export function createServer({
         return json(res, 200, { ok: true, database: "ready" });
       }
 
+      if (
+        ["GET", "HEAD"].includes(req.method || "") &&
+        url.pathname === "/favicon.ico"
+      ) {
+        res.writeHead(204, {
+          "cache-control": "public, max-age=86400",
+          "x-content-type-options": "nosniff",
+        });
+        return res.end();
+      }
+
       if (req.method === "GET" && url.pathname === "/metrics") {
         if (!requireBearer(req, orchestratorToken)) {
           return json(res, 401, { error: "UNAUTHORIZED" });
@@ -674,7 +686,11 @@ export function createServer({
   return server;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+const invokedDirectly =
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (invokedDirectly) {
   const port = Number(process.env.PORT || 8080);
   const server = createServer();
   server.listen(port, () => {

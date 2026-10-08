@@ -168,6 +168,9 @@ async function renderRoute(route = parseRoute()) {
   }
 
   const { epoch, signal } = beginNavigation(route);
+  // Close the mobile drawer when navigation starts, not after slow API requests:
+  // otherwise an in-flight view render can close a drawer the user just opened.
+  sidebar.classList.remove("mobile-open");
   updateNavigation(route);
   setPageMeta("");
   content.innerHTML = loadingView();
@@ -182,7 +185,6 @@ async function renderRoute(route = parseRoute()) {
     const currentMeta=$("#page-meta").textContent;
     setPageMeta(currentMeta.replace(/ · Updated .*$/,""));
     content.focus({preventScroll:true});
-    sidebar.classList.remove("mobile-open");
   } catch (error) {
     if (error?.name === "AbortError" || !isCurrentEpoch(epoch)) return;
     content.innerHTML = errorState(
@@ -209,7 +211,11 @@ async function boot() {
       await renderRoute(route);
     }
   } catch (error) {
-    if(error?.status===401) clearBrowserSession();
+    if(error?.status===401){
+      clearBrowserSession();
+      showAuth();
+      return;
+    }
     toast(error.message,true);
     showAuth();
   }

@@ -11,8 +11,15 @@ const workspace = `UI Smoke ${stamp}`;
 const outputDir = path.resolve("artifacts/ui-browser");
 fs.mkdirSync(outputDir, { recursive: true });
 
-const browser = await chromium.launch({ headless: true });
+let browser;
+try {
+  browser = await chromium.launch({ headless: true });
+} catch (error) {
+  if (!String(error.message).includes("Executable doesn't exist")) throw error;
+  browser = await chromium.launch({ headless: true, channel: "chrome" });
+}
 const failures = [];
+let awaitingExpectedValidation400 = false;
 
 function captureRuntimeErrors(page, label) {
   let authenticated = false;
@@ -22,6 +29,9 @@ function captureRuntimeErrors(page, label) {
   page.on("console", (message) => {
     if (message.type() !== "error") return;
     const messageText = message.text();
+    // The negative-form test deliberately produces a 400 response.
+    if (awaitingExpectedValidation400 &&
+        /Failed to load resource:.*400 \(Bad Request\)/i.test(messageText)) return;
     if (
       !authenticated &&
       /Failed to load resource:.*401 \(Unauthorized\)/i.test(messageText)
@@ -89,13 +99,18 @@ await page.locator("#signup-name").fill("UI Smoke Owner");
 await page.locator("#signup-password").fill(password);
 await page.locator("#signup-workspace").fill(workspace);
 await page.locator("#signup-slug").fill("ui-smoke-" + stamp);
-await Promise.all([
+const [signupResponse] = await Promise.all([
   page.waitForResponse((response) =>
     response.url().includes("/v1/platform/auth/signup") &&
     response.request().method() === "POST"
   ),
   page.locator("#signup-form button[type=submit]").click(),
 ]);
+if (!signupResponse.ok()) {
+  throw new Error(`Signup failed: HTTP ${signupResponse.status()} ${
+    (await signupResponse.text()).slice(0, 500)
+  }`);
+}
 await page.locator("#app-view:not(.hidden)").waitFor({ timeout: 10_000 });
 markDesktopAuthenticated();
 await page.locator("#content").waitFor({ state: "visible" });
@@ -117,6 +132,70 @@ await page.screenshot({
   fullPage: true,
 });
 
+// Verify an actual customer workflow, not just static routing. Detail tabs
+// previously crashed when a single-element query helper was used as a list.
+await page.goto(base + "/console/targets", { waitUntil: "networkidle" });
+await page.locator("#targets-add").click();
+await page.locator("#target-form input[name=organizationName]").fill("Browser certification target");
+await page.locator("#target-form input[name=baseUrl]").fill("https://qa.example.test");
+const [targetResponse] = await Promise.all([
+  page.waitForResponse((response) =>
+    response.url().endsWith("/targets") &&
+    response.request().method() === "POST"
+  ),
+  page.locator("#target-form button[type=submit]").click(),
+]);
+if (targetResponse.status() !== 201) {
+  failures.push("desktop-target-create: HTTP " + targetResponse.status());
+} else {
+  const targetLink = page.locator("[data-target-row]").filter({
+    hasText: "Browser certification target",
+  });
+  await targetLink.waitFor({ timeout: 10000 });
+  await targetLink.click();
+  await page.locator("#target-tab-content").waitFor({ timeout: 10000 });
+  for (const tab of ["overview", "findings", "runs", "monitoring",
+    "authorization", "reports", "activity"]) {
+    await page.locator(`button.tab[data-tab="${tab}"]`).click();
+    const content = (await page.locator("#target-tab-content").innerText()).trim();
+    if (!content || content.includes("Could not load this view")) {
+      failures.push("desktop-target-" + tab + ": missing/broken tab content");
+    }
+    await assertNoHorizontalOverflow(page, "desktop-target-" + tab);
+  }
+  await page.screenshot({
+    path: path.join(outputDir, "desktop-target-detail.png"),
+    fullPage: true,
+  });
+}
+
+// A server-side validation error must remain recoverable, never silently fail
+// or leave a disabled submit button behind.
+await page.goto(base + "/console/targets", { waitUntil: "networkidle" });
+await page.locator("#targets-add").click();
+await page.locator("#target-form input[name=organizationName]").fill("Invalid protocol check");
+await page.locator("#target-form input[name=baseUrl]").fill("ftp://qa.example.test");
+awaitingExpectedValidation400 = true;
+const [invalidResponse] = await Promise.all([
+  page.waitForResponse((response) =>
+    response.url().endsWith("/targets") &&
+    response.request().method() === "POST"
+  ),
+  page.locator("#target-form button[type=submit]").click(),
+]);
+if (invalidResponse.status() !== 400) {
+  failures.push("desktop-target-validation: HTTP " + invalidResponse.status());
+} else {
+  await page.locator("#toast.show").waitFor({ timeout: 4000 });
+  await page.waitForTimeout(100);
+  const retryReady = await page.locator("#target-form button[type=submit]").isEnabled();
+  const dialogOpen = await page.locator("#modal").evaluate((node) => node.open);
+  if (!retryReady || !dialogOpen) failures.push("desktop-target-validation: not recoverable");
+}
+await page.locator("#target-cancel").click();
+await page.waitForTimeout(200);
+awaitingExpectedValidation400 = false;
+
 const mobile = await browser.newContext({
   viewport: { width: 390, height: 844 },
   isMobile: true,
@@ -136,6 +215,9 @@ await Promise.all([
 ]);
 await mobilePage.locator("#app-view:not(.hidden)").waitFor({ timeout: 10_000 });
 markMobileAuthenticated();
+if (await mobilePage.locator("#toast.show").filter({ hasText: "Your session has expired." }).count()) {
+  failures.push("mobile: fresh login retained a spurious session-expired toast");
+}
 await assertNoHorizontalOverflow(mobilePage, "mobile-home");
 await mobilePage.locator("#mobile-menu").click();
 await mobilePage.locator("#sidebar.mobile-open").waitFor();

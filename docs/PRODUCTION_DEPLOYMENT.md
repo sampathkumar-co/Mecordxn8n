@@ -199,8 +199,8 @@ In GitHub:
 3. Run it from `main`.
 4. Require a completely green workflow, including **Strict authenticated HTTPS
    smoke**, before treating the release as live.
-5. The strict smoke also compares every public Control Center JavaScript/CSS
-   asset against the checked-out release. If public assets are stale, the
+5. The strict smoke also compares the public Control Center HTML, JavaScript
+   and CSS assets against the checked-out release. If public assets are stale, the
    rollout must fail even when health checks pass. Independently verify with:
    `node scripts/verify-public-assets.mjs https://your-production-domain`.
    The checker is read-only and does not require customer credentials.

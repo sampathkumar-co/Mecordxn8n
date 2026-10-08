@@ -13,7 +13,8 @@ async function listAssets(directory, prefix = "") {
     const name = prefix ? prefix + "/" + entry.name : entry.name;
     if (entry.isDirectory()) {
       files.push(...await listAssets(path.join(directory, entry.name), name));
-    } else if (entry.isFile() && allowedExtensions.has(path.extname(entry.name))) {
+    } else if (entry.isFile() &&
+      (allowedExtensions.has(path.extname(entry.name)) || name === "index.html")) {
       files.push(name);
     }
   }
@@ -44,7 +45,7 @@ export async function verifyPublicAssets(baseUrl, {
   const failures = [];
   for (const file of files) {
     const expected = digest(await fs.readFile(path.join(root, file), "utf8"));
-    const url = new URL("/console/" + file, origin);
+    const url = new URL(file === "index.html" ? "/console" : "/console/" + file, origin);
     try {
       const response = await fetchImpl(url, {
         cache: "no-store",

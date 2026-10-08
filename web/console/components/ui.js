@@ -87,9 +87,9 @@ export function tablePanel({
   actions = "",
 }) {
   const body = rows.length
-    ? `<div class="table-wrap"><table class="table">
+    ? `<div class="table-wrap mobile-card-wrap"><table class="table mobile-card-table">
         <thead><tr>${headers.map((h) => `<th scope="col">${escapeHtml(h)}</th>`).join("")}</tr></thead>
-        <tbody>${rows.map((row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join("")}</tr>`).join("")}</tbody>
+        <tbody>${rows.map((row) => `<tr>${row.map((cell, index) => `<td data-label="${escapeHtml(headers[index] || "")}">${cell}</td>`).join("")}</tr>`).join("")}</tbody>
       </table></div>`
     : emptyState(emptyTitle, emptyCopy);
   return panel(title, body, { badge: String(rows.length), subtitle, actions });

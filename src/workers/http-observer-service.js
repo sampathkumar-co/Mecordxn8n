@@ -1,3 +1,5 @@
+import { pathToFileURL } from "node:url";
+
 import { runPublicHttpObserverOnce } from "./public-http.js";
 import { createTriggeredWorkerService } from "./trigger-service.js";
 
@@ -21,7 +23,11 @@ export function createObserverService({
   });
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+const invokedDirectly =
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (invokedDirectly) {
   const port = Number(process.env.WORKER_PORT || 8090);
   const server = createObserverService();
   server.listen(port, () => {

@@ -40,6 +40,34 @@ export function closeDrawer() {
   if (drawer?.open) drawer.close();
 }
 
+// Own asynchronous form failures in one place, including network/timeouts.
+// Event handlers execute synchronously until their first await so FormData
+// can still access event.currentTarget before the browser clears it.
+export function onSubmit(form, action) {
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (form.dataset.submitting === "1") return;
+    const button = event.submitter instanceof HTMLButtonElement ? event.submitter : null;
+    if (button?.disabled) return;
+    form.dataset.submitting = "1";
+    form.setAttribute("aria-busy", "true");
+    if (button) button.disabled = true;
+    let result;
+    try {
+      result = action(event);
+    } catch (error) {
+      result = Promise.reject(error);
+    }
+    Promise.resolve(result)
+      .catch((error) => toast(error?.message || "Action failed. Please try again.", true))
+      .finally(() => {
+        delete form.dataset.submitting;
+        form.removeAttribute("aria-busy");
+        if (button?.isConnected) button.disabled = false;
+      });
+  });
+}
+
 export async function confirmDecision({
   title,
   kicker = "CONFIRM DECISION",

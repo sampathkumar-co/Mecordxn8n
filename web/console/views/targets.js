@@ -179,13 +179,13 @@ export async function renderTargetDetail({ content, signal, route }) {
 
     $("#auth-tab-open")?.addEventListener("click", () => openAuthorizationCenter(id));
     $("#target-generate-report")?.addEventListener("click", () => createReport(id).catch((e) => toast(e.message, true)));
-    $(".report-release").forEach((button) => {
+    $$(".report-release").forEach((button) => {
       button.addEventListener("click", () => requestReportRelease(button.dataset.reportId).catch((e) => toast(e.message, true)));
     });
-    $(".report-share").forEach((button) => {
+    $$(".report-share").forEach((button) => {
       button.addEventListener("click", () => shareReport(button.dataset.reportId).catch((e) => toast(e.message, true)));
     });
-    $(".monitor-toggle").forEach((button) => {
+    $$(".monitor-toggle").forEach((button) => {
       button.addEventListener("click", () => {
         const monitor = monitors.find((m) => m.id === button.dataset.id);
         toggleMonitor(monitor, button.dataset.enabled !== "1").catch((e) => toast(e.message, true));

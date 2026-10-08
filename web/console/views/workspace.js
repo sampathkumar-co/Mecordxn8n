@@ -3,7 +3,7 @@ import { state, currentWorkspace } from "../core/state.js";
 import { permission, disabledAttrs } from "../core/permissions.js";
 import { escapeHtml, fmtDate, fmtRelative } from "../core/format.js";
 import { chip, detail, entityHeader, metric, panel, partialBanner, setPageMeta, tablePanel, $, $$, toast } from "../components/ui.js";
-import { closeModal, confirmDecision, openModal } from "../components/dialog.js";
+import { closeModal, confirmDecision, openModal, onSubmit } from "../components/dialog.js";
 import { openApiKeyForm, openBilling, openBillingPortal, openInviteForm, revokeApiKey } from "../components/actions.js";
 
 function workspaceSubnav(active) {
@@ -38,7 +38,7 @@ async function openMfaEnrollment() {
         </div>
       </form>`);
     $("#mfa-confirm-cancel").addEventListener("click", closeModal);
-    $("#mfa-confirm-form").addEventListener("submit", async (event) => {
+    onSubmit($("#mfa-confirm-form"), async (event) => {
       event.preventDefault();
       const button=event.currentTarget.querySelector('button[type="submit"]');
       button.disabled=true;
@@ -71,7 +71,7 @@ function openMfaStepUp() {
       </div>
     </form>`);
   $("#mfa-stepup-cancel").addEventListener("click", closeModal);
-  $("#mfa-stepup-form").addEventListener("submit", async (event) => {
+  onSubmit($("#mfa-stepup-form"), async (event) => {
     event.preventDefault();
     const button=event.currentTarget.querySelector('button[type="submit"]');
     button.disabled=true;
@@ -101,7 +101,7 @@ function openMfaDisable() {
       </div>
     </form>`);
   $("#mfa-disable-cancel").addEventListener("click", closeModal);
-  $("#mfa-disable-form").addEventListener("submit", async (event) => {
+  onSubmit($("#mfa-disable-form"), async (event) => {
     event.preventDefault();
     const button=event.currentTarget.querySelector('button[type="submit"]');
     button.disabled=true;
@@ -373,7 +373,7 @@ async function renderAudit({ content, signal, wid, workspace, section }) {
       </div>
     </div>`;
 
-  $("#retention-form")?.addEventListener("submit",async(event)=>{
+  onSubmit($("#retention-form"),async(event)=>{
     event.preventDefault();
     const form=new FormData(event.currentTarget);
     try{

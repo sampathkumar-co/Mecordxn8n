@@ -3,7 +3,7 @@ import { state } from "../core/state.js";
 import { permission, disabledAttrs } from "../core/permissions.js";
 import { escapeHtml, fmtDate, safeJson } from "../core/format.js";
 import { $, detail, chip, toast } from "./ui.js";
-import { closeModal, confirmDecision, openModal } from "./dialog.js";
+import { closeModal, confirmDecision, openModal, onSubmit } from "./dialog.js";
 
 function refreshed(message = "") {
   if (message) toast(message);
@@ -27,7 +27,7 @@ export function openTargetForm() {
       <div class="form-actions"><button class="button" type="button" id="target-cancel">Cancel</button><button class="button primary" type="submit" ${disabledAttrs(access)}>Register target</button></div>
     </form>`);
   $("#target-cancel").addEventListener("click", closeModal);
-  $("#target-form").addEventListener("submit", async (event) => {
+  onSubmit($("#target-form"), async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const base = new URL(form.get("baseUrl"));
@@ -114,7 +114,7 @@ export async function openAuthorizationCenter(targetId) {
     } catch (error) { toast(error.message, true); }
   });
 
-  $("#auth-upgrade-form").addEventListener("submit", async (event) => {
+  onSubmit($("#auth-upgrade-form"), async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const base = new URL(center.target.base_url);
@@ -155,7 +155,7 @@ export function openInviteForm() {
       <label>Role<select name="role"><option>VIEWER</option><option>OPERATOR</option><option>ADMIN</option></select></label>
     </div><div class="form-actions"><button class="button" id="invite-cancel" type="button">Cancel</button><button class="button primary" type="submit" ${disabledAttrs(access)}>Create invite</button></div></form>`);
   $("#invite-cancel").addEventListener("click", closeModal);
-  $("#invite-form").addEventListener("submit", async (event) => {
+  onSubmit($("#invite-form"), async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const result = await api(`/v1/platform/workspaces/${state.workspaceId}/invites`, {
@@ -180,7 +180,7 @@ export function openApiKeyForm() {
       </fieldset>
     </div><div class="form-actions"><button class="button" id="key-cancel" type="button">Cancel</button><button class="button primary" type="submit" ${disabledAttrs(access)}>Create key</button></div></form>`);
   $("#key-cancel").addEventListener("click", closeModal);
-  $("#api-key-form").addEventListener("submit", async (event) => {
+  onSubmit($("#api-key-form"), async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const result = await api(`/v1/platform/workspaces/${state.workspaceId}/api-keys`, {
@@ -234,7 +234,7 @@ export function openIntegrationForm() {
   renderConfig();
   $("#integration-provider").addEventListener("change", renderConfig);
   $("#integration-cancel").addEventListener("click", closeModal);
-  $("#integration-form").addEventListener("submit", async (event) => {
+  onSubmit($("#integration-form"), async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const provider = form.get("provider");
@@ -269,7 +269,7 @@ export function openMonitorForm(target) {
       <label class="full">Requested URL<input name="requestedUrl" type="url" value="${escapeHtml(target.baseUrl)}" required></label>
     </div><div class="form-actions"><button class="button" id="monitor-cancel" type="button">Cancel</button><button class="button primary" type="submit" ${disabledAttrs(access)}>Create monitor</button></div></form>`);
   $("#monitor-cancel").addEventListener("click", closeModal);
-  $("#monitor-form").addEventListener("submit", async (event) => {
+  onSubmit($("#monitor-form"), async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     await api(`/v1/platform/workspaces/${state.workspaceId}/targets/${target.id}/monitors`, {
@@ -296,7 +296,7 @@ export function openRepairRequest(finding) {
       <div class="form-actions"><button class="button" id="repair-cancel" type="button">Cancel</button><button class="button primary" type="submit" ${disabledAttrs(access)}>Request approval</button></div>
     </form>`);
   $("#repair-cancel").addEventListener("click", closeModal);
-  $("#repair-request-form").addEventListener("submit", async (event) => {
+  onSubmit($("#repair-request-form"), async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     await api(`/v1/platform/workspaces/${state.workspaceId}/findings/${finding.id}/remediate`, {

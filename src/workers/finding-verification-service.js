@@ -1,3 +1,5 @@
+import { pathToFileURL } from "node:url";
+
 import { runFindingVerificationOnce } from "./finding-verification.js";
 import { createTriggeredWorkerService } from "./trigger-service.js";
 
@@ -16,7 +18,11 @@ export function createService({
   });
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+const invokedDirectly =
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (invokedDirectly) {
   const port = Number(process.env.WORKER_PORT || 8094);
   createService().listen(port, () => {
     console.log("finding-verification-worker listening on :" + port);

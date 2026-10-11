@@ -21,25 +21,44 @@ if (!verifyUrl) throw new Error("RESTORE_DATABASE_URL is required");
 // A verification restore is destructive (--clean). Never allow it to target
 // any configured application, backup source, or n8n database, even if the URL
 // uses a different username or the postgres/postgresql scheme aliases.
-function postgresIdentity(value) {
+function postgresIdentity(value, name) {
   if (!value) return null;
+  let parsed;
   try {
-    const parsed = new URL(value);
-    if (!["postgres:", "postgresql:"].includes(parsed.protocol)) return null;
-    return [
-      parsed.hostname.toLowerCase(),
-      parsed.port || "5432",
-      decodeURIComponent(parsed.pathname.startsWith("/") ? parsed.pathname.slice(1) : parsed.pathname),
-    ].join("/");
+    parsed = new URL(value);
   } catch {
-    return null;
+    throw new Error(name + " must be an explicit TCP PostgreSQL URL; ambiguous libpq forms are unsafe");
   }
+  if (!["postgres:", "postgresql:"].includes(parsed.protocol) ||
+      !parsed.hostname || !parsed.pathname || parsed.pathname === "/") {
+    throw new Error(name + " must use a TCP PostgreSQL URL with host and database");
+  }
+  // libpq accepts Unix sockets in URL host or ?host=, as well as overrides
+  // from connection parameters. Reject every ambiguous form before --clean.
+  const host = parsed.hostname.toLowerCase();
+  if (!/^[a-z0-9.-]+$/.test(host) && !/^\[[0-9a-f:]+\]$/.test(host)) {
+    throw new Error(name + " must use a DNS/IP TCP host");
+  }
+  const allowedParams = new Set(["sslmode", "application_name", "connect_timeout"]);
+  for (const param of parsed.searchParams.keys()) {
+    if (!allowedParams.has(param)) {
+      throw new Error(name + " contains unsupported libpq parameter " + param);
+    }
+  }
+  const database = decodeURIComponent(parsed.pathname.slice(1));
+  if (!database || database.includes("/") || database.includes("\\") ||
+      database.includes("\0")) {
+    throw new Error(name + " must identify one unambiguous database");
+  }
+  return { database, host, port: parsed.port || "5432" };
 }
 
-const restoreIdentity = postgresIdentity(verifyUrl);
+const restoreIdentity = postgresIdentity(verifyUrl, "RESTORE_DATABASE_URL");
 for (const envName of ["DATABASE_URL", "BACKUP_DATABASE_URL", "N8N_DATABASE_URL"]) {
-  const sourceIdentity = postgresIdentity(process.env[envName]);
-  if (restoreIdentity && sourceIdentity && restoreIdentity === sourceIdentity) {
+  const sourceIdentity = postgresIdentity(process.env[envName], envName);
+  // Require different database names even across host aliases. A disposable
+  // verification target should never reuse the source database name.
+  if (sourceIdentity && restoreIdentity.database === sourceIdentity.database) {
     throw new Error("RESTORE_DATABASE_URL must not point at " + envName + "; use a separate disposable database");
   }
 }

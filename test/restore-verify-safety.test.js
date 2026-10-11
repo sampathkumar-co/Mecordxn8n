@@ -46,3 +46,48 @@ test("verification restore allows different database name to reach manifest vali
   assert.match(out.stderr, /backup checksum manifest is required/);
   assert.doesNotMatch(out.stderr, /must not point at/);
 });
+
+test("verification restore refuses URL-encoded Unix socket identity", () => {
+  const out = invokeRestore({
+    DATABASE_URL: "postgresql://%2Fvar%2Flib%2Fpostgresql/app",
+    RESTORE_DATABASE_URL: "postgresql:///app?host=%2Fvar%2Flib%2Fpostgresql",
+  });
+  assert.equal(out.status, 1);
+  assert.match(out.stderr, /must use a TCP PostgreSQL URL|ambiguous libpq forms are unsafe|must use a DNS\/IP TCP host/);
+});
+
+test("verification restore rejects libpq keyword-value source identities", () => {
+  const out = invokeRestore({
+    DATABASE_URL: "host=/var/lib/postgresql dbname=app",
+    RESTORE_DATABASE_URL: "postgresql://127.0.0.1/restore_only",
+  });
+  assert.equal(out.status, 1);
+  assert.match(out.stderr, /ambiguous libpq forms are unsafe/);
+});
+
+test("verification restore rejects query-string host overrides", () => {
+  const out = invokeRestore({
+    DATABASE_URL: "postgresql://127.0.0.1/source",
+    RESTORE_DATABASE_URL: "postgresql:///source?host=%2Fvar%2Flib%2Fpostgresql",
+  });
+  assert.equal(out.status, 1);
+  assert.match(out.stderr, /must use a TCP PostgreSQL URL/);
+});
+
+test("verification restore rejects the same database name across host aliases", () => {
+  const out = invokeRestore({
+    DATABASE_URL: "postgresql://db-main.internal/app",
+    RESTORE_DATABASE_URL: "postgresql://db-alias.internal/app",
+  });
+  assert.equal(out.status, 1);
+  assert.match(out.stderr, /must not point at DATABASE_URL/);
+});
+
+test("verification restore still accepts a separate database with ordinary SSL options", () => {
+  const out = invokeRestore({
+    DATABASE_URL: "postgresql://db.internal/source?sslmode=require",
+    RESTORE_DATABASE_URL: "postgresql://db.internal/restore_target?sslmode=require",
+  });
+  assert.equal(out.status, 1);
+  assert.match(out.stderr, /backup checksum manifest is required/);
+});

@@ -57,3 +57,11 @@ Audit host: LAPTOP-GKKTT227. **Status: NOT PRODUCTION CERTIFIED.**
 - [x] Re-ran the real encrypted backup and separate-database restore after adding the guard: PASS.
 - [x] Re-ran the cross-platform check runner on a fresh isolated DB before the additional four restore tests: 116/116 PASS.
 - [x] Completed fresh isolated PostgreSQL 17 database `mecordxn8n_pr_validation`, migrations 001-014, and full cross-platform check runner after adding four tests: **120 passed, 0 failed, 0 skipped**. Reusing a previous test DB is prohibited for release evidence because persisted rate limits and test fixtures collide.
+
+## PR #29 reviewer-driven improvement
+
+- [x] Addressed review of scripts/restore-verify.mjs: reject ambiguous Unix-socket URLs, libpq keyword/value forms, database-host overrides and unknown query parameters before destructive restore.
+- [x] Reject the same source/restore database name even across TCP host aliases. Separate verification databases must have a distinct name.
+- [x] Added five reviewer-targeted regressions (nine restore safety tests total): 9/9 PASS.
+- [x] Reverified a legitimate encrypted restore into the isolated target after the stricter identity checks.
+- [x] Re-ran the complete check runner on fresh isolated PostgreSQL 17 database mecordxn8n_pr29_fix_validation: **125 passed, 0 failed, 0 skipped**.

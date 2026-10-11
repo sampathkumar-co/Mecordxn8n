@@ -30,7 +30,8 @@ Audit host: LAPTOP-GKKTT227. **Status: NOT PRODUCTION CERTIFIED.**
 
 ## Remaining P1/P2
 
-- [ ] Sustained authenticated API, PostgreSQL, n8n queues and worker fault recovery load (p50/p95/p99; time series; thresholds).
+- [x] Bounded isolated authenticated API load: 2,545/2,545 HTTP 200, 45.1 s, concurrency 8; p50 14.44 ms, p95 22.45 ms, p99 31.31 ms. See docs/HTTP_LOAD_BENCHMARK.md.
+- [ ] Production-like multiple-user sustained load, PostgreSQL contention, n8n queues and worker fault recovery (p50/p95/p99, time series, thresholds).
 - [ ] Production alerts, audit trails, incident response, rollback/restore drill, tested on-call.
 - [ ] Customer onboarding, subscriptions, trial expiry and external notification delivery in controlled test accounts.
 

@@ -18,6 +18,32 @@ if (!backup || !fs.existsSync(backup)) {
 }
 if (!verifyUrl) throw new Error("RESTORE_DATABASE_URL is required");
 
+// A verification restore is destructive (--clean). Never allow it to target
+// any configured application, backup source, or n8n database, even if the URL
+// uses a different username or the postgres/postgresql scheme aliases.
+function postgresIdentity(value) {
+  if (!value) return null;
+  try {
+    const parsed = new URL(value);
+    if (!["postgres:", "postgresql:"].includes(parsed.protocol)) return null;
+    return [
+      parsed.hostname.toLowerCase(),
+      parsed.port || "5432",
+      decodeURIComponent(parsed.pathname.startsWith("/") ? parsed.pathname.slice(1) : parsed.pathname),
+    ].join("/");
+  } catch {
+    return null;
+  }
+}
+
+const restoreIdentity = postgresIdentity(verifyUrl);
+for (const envName of ["DATABASE_URL", "BACKUP_DATABASE_URL", "N8N_DATABASE_URL"]) {
+  const sourceIdentity = postgresIdentity(process.env[envName]);
+  if (restoreIdentity && sourceIdentity && restoreIdentity === sourceIdentity) {
+    throw new Error("RESTORE_DATABASE_URL must not point at " + envName + "; use a separate disposable database");
+  }
+}
+
 const manifestPath = backup + ".json";
 if (!fs.existsSync(manifestPath)) {
   throw new Error("backup checksum manifest is required");

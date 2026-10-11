@@ -1,6 +1,6 @@
 # Local Authenticated API Load Benchmark
 
-Run only against an **isolated loopback test deployment** with a disposable PostgreSQL database. Never point the script at the public production website. The script refuses non-loopback hosts and HTTPS targets.
+Run only against an **isolated loopback test deployment** with a disposable PostgreSQL database. Never point the script at the public production website. The script refuses non-loopback hosts and HTTPS targets and never follows HTTP redirects, including during signup and measured requests. IPv4 and IPv6 loopback URLs are supported.
 
 ## Commands
 

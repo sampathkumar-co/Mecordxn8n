@@ -4,7 +4,7 @@ import { performance } from "node:perf_hooks";
 import { setTimeout as sleep } from "node:timers/promises";
 
 const base = new URL(process.env.LOAD_TEST_URL || "http://127.0.0.1:18081");
-if (!["127.0.0.1", "localhost", "::1"].includes(base.hostname) || base.protocol !== "http:") {
+if (!["127.0.0.1", "localhost", "[::1]"].includes(base.hostname) || base.protocol !== "http:") {
   throw new Error("The certification benchmark is restricted to local nonproduction HTTP servers");
 }
 const durationMs = Math.min(90_000, Math.max(3_000, Number(process.env.LOAD_DURATION_MS || 45_000)));
@@ -13,6 +13,7 @@ const maxRequests = Math.min(12_000, Math.max(50, Number(process.env.LOAD_MAX_RE
 const id = randomUUID().slice(0, 12);
 const signup = await fetch(new URL("/v1/platform/auth/signup", base), {
   method: "POST",
+  redirect: "manual",
   headers: {"content-type":"application/json"},
   body: JSON.stringify({
     email: "bench-" + id + "@example.test",
@@ -40,6 +41,7 @@ async function worker() {
       const res = await fetch(target, {
         headers: {authorization: "Bearer " + account.token},
         cache: "no-store",
+        redirect: "manual",
         signal: AbortSignal.timeout(8_000),
       });
       await res.arrayBuffer();
